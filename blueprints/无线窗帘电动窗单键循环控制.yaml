@@ -1,0 +1,338 @@
+blueprint:
+  name: 无线窗帘电动窗单键循环控制
+  description: |
+    实现“单键控制窗帘循环 (开 -> 停 -> 关 -> 停)”，支持多种触发方式混用。
+
+    ### ✨ 功能亮点
+    1. **智能循环**：按键触发时，自动判断是“停止”还是“反向动作”。
+    2. **状态追踪**：自动监听系统指令，计算剩余时间，确保“正在运行”状态准确。
+    3. **设备支持**：
+       *   **KNX/普通面板** (Device触发器，需选组地址)
+       *   **领普/米家遥控** (Event实体，需校验按键ID)
+       *   **宜家/Z2M遥控** (Device触发器，需校验Payload)
+
+  domain: automation
+
+  input:
+    # =============================
+    # 基础参数
+    # =============================
+    target_cover:
+      name: 目标窗帘
+      selector:
+        entity:
+          domain: cover
+
+    time_helper:
+      name: 结束时间辅助实体（input_datetime）
+      selector:
+        entity:
+          domain: input_datetime
+
+    last_action_helper:
+      name: 上次动作记录（open / close）
+      selector:
+        entity:
+          domain: input_select
+
+    total_duration:
+      name: 全程运行时间（秒）
+      default: 45
+      selector:
+        number:
+          min: 1
+          max: 300
+          unit_of_measurement: seconds
+
+    # =============================
+    # KNX 输入（Group Address 列表）
+    # =============================
+    knx_group_addresses:
+      name: KNX Group Address 列表
+      description: |
+        示例：
+          \- 1/1/1 
+          [1/1/2]
+          [1/1/1, 1/1/2]
+          [1/1/*]  ← 支持通配符（同一 line 下任意号）
+      default: []
+      selector:
+        object:
+
+    # =============================
+    # 领普 / 米家 Event
+    # =============================
+    linp_event_entity:
+      name: 领普/米家事件实体（event.xxx，可留空）
+      default: ""
+      selector:
+        entity:
+          domain: event
+
+    linp_button_number:
+      name: 领普通按键编号（1=左，2=上，3=右，4=下）
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 4
+          step: 1
+
+    # =============================
+    # 通用单击 Event（无按键类型）
+    # =============================
+    generic_event_entity:
+      name: 通用单键事件（event.xxx，无按键类型，可留空）
+      default: ""
+      selector:
+        entity:
+          domain: event
+
+    # =============================
+    # IKEA / Z2M
+    # =============================
+    z2m_device:
+      name: Z2M / IKEA 遥控器设备（可留空）
+      default: ""
+      selector:
+        device: {}
+
+    z2m_action:
+      name: Z2M 动作名（如 toggle / brightness_up_click / arrow_left_click）
+      default: "toggle"
+      selector:
+        text: {}
+
+mode: parallel
+max: 10
+
+# ======================================
+# 统一触发器（全部写死，不用 input）
+# ======================================
+trigger:
+  # KNX 按键（我们只看 destination / telegramtype）
+  - platform: event
+    event_type: knx_event
+    id: knx
+
+  # 领普 / 米家：监听所有状态变化，通过 condition 过滤 entity_id
+  - platform: event
+    event_type: state_changed
+    id: linp
+
+  # 通用单击事件：监听所有 state_changed
+  - platform: event
+    event_type: state_changed
+    id: generic
+
+  # Z2M / ZHA
+  - platform: event
+    event_type: zha_event
+    id: z2m_zha
+
+  # Z2M / deCONZ
+  - platform: event
+    event_type: deconz_event
+    id: z2m_deconz
+
+  # Z2M / MQTT（如果你走 mqtt 集成）
+  - platform: event
+    event_type: mqtt
+    id: z2m_mqtt
+
+  # 用于追踪 cover.open / close / stop
+  - platform: event
+    event_type: call_service
+    event_data:
+      domain: cover
+    id: service_call
+
+# ======================================
+# 变量
+# ======================================
+variables:
+  cover_entity: !input target_cover
+  time_end: !input time_helper
+  last_action: !input last_action_helper
+  total_time: !input total_duration
+
+  knx_addrs: !input knx_group_addresses
+  linp_entity: !input linp_event_entity
+  linp_btn: !input linp_button_number
+  generic_event: !input generic_event_entity
+  z2m_dev: !input z2m_device
+  z2m_cmd: !input z2m_action
+
+# ======================================
+# 条件：根据触发源 + 输入，筛选有效事件
+# ======================================
+condition:
+  - condition: template
+    value_template: |
+      {% set id = trigger.id %}
+
+      {# ========== ① KNX ========== #}
+      {% if id == 'knx' %}
+        {% if (knx_addrs is not iterable) or (knx_addrs | length == 0) %}
+          false
+        {% else %}
+          {% set dest = (trigger.event.data.destination | string) %}
+          {% set ttype = trigger.event.data.telegramtype | string %}
+          {% set base = dest.split('/')[:2] | join('/') ~ '/*' %}
+          {{ ttype == 'GroupValueWrite'
+             and (
+               dest in knx_addrs
+               or base in knx_addrs
+             )
+          }}
+        {% endif %}
+
+      {# ========== ② 领普 / 米家 Event 实体 ========== #}
+      {% elif id == 'linp' %}
+        {% if linp_entity == '' %}
+          false
+        {% else %}
+          {% set e = trigger.event.data %}
+          {% set ent = e.entity_id | string %}
+          {% set new = e.new_state %}
+          {{ ent == linp_entity
+             and new is not none
+             and (new.attributes.event_type | string) == '单击'
+             and (new.attributes.按键类型 | int(0)) == linp_btn }}
+        {% endif %}
+
+      {# ========== ②.5 通用事件 event.xxx（只有单击，无按键类型） ========== #}
+      {% elif id == 'generic' %}
+        {% if generic_event == '' %}
+          false
+        {% else %}
+          {% set e = trigger.event.data %}
+          {% set ent = e.entity_id | string %}
+          {% set new = e.new_state %}
+          {{ ent == generic_event
+             and new is not none
+             and (new.attributes.event_type | string) == '单击' }}
+        {% endif %}
+
+      {# ========== ③ Z2M / IKEA ========== #}
+      {% elif id in ['z2m_zha', 'z2m_deconz', 'z2m_mqtt'] %}
+        {% if z2m_dev == '' %}
+          false
+        {% else %}
+          {% set d = trigger.event.data %}
+          {% set dev_id = d.device_id | default('') %}
+          {% set cmd = d.command | default(d.payload | default(d.event | default(''))) %}
+          {{ dev_id == z2m_dev and cmd == z2m_cmd }}
+        {% endif %}
+
+      {# ========== ④ cover service 追踪 ========== #}
+      {% elif id == 'service_call' %}
+        {# 只关心当前这一个窗帘 #}
+        {% set sdata = trigger.event.data.service_data %}
+        {% set ent = sdata.entity_id %}
+        {% if ent is string %}
+          {{ ent == cover_entity }}
+        {% elif ent is iterable %}
+          {{ cover_entity in ent }}
+        {% else %}
+          false
+        {% endif %}
+
+      {% else %}
+        false
+      {% endif %}
+
+# ======================================
+# 动作逻辑：路径1 追踪 cover 运动，路径2 单键循环控制
+# ======================================
+action:
+  - choose:
+      # -----------------------------------------
+      # 路径 1：service_call → 更新“移动结束时间”和“最后方向”
+      # -----------------------------------------
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'service_call' }}"
+        sequence:
+          - variables:
+              pos: "{{ state_attr(cover_entity, 'current_position') | float(0) }}"
+              direction: "{{ 'open' if trigger.event.data.service == 'open_cover' else 'close' }}"
+              remain_pct: "{{ 100 - pos if direction == 'open' else pos }}"
+              remain_sec: "{{ (remain_pct / 100.0) * total_time }}"
+
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger.event.data.service in ['open_cover', 'close_cover'] }}"
+                sequence:
+                  - action: input_datetime.set_datetime
+                    target:
+                      entity_id: "{{ time_end }}"
+                    data:
+                      datetime: >
+                        {{ (now() + timedelta(seconds=remain_sec))
+                           .strftime('%Y-%m-%d %H:%M:%S') }}
+
+                  - action: input_select.select_option
+                    target:
+                      entity_id: "{{ last_action }}"
+                    data:
+                      option: "{{ direction }}"
+
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger.event.data.service == 'stop_cover' }}"
+                sequence:
+                  - action: input_datetime.set_datetime
+                    target:
+                      entity_id: "{{ time_end }}"
+                    data:
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    # -----------------------------------------
+    # 路径 2：按键触发 → 单键循环（开 / 停 / 关 / 停）
+    # -----------------------------------------
+    default:
+      - variables:
+          moving_end: "{{ states(time_end) }}"
+          is_moving: "{{ now().strftime('%Y-%m-%d %H:%M:%S') < moving_end }}"
+
+      - choose:
+          # 如果当前认为“窗帘正在移动” → 本次按键 = 停
+          - conditions:
+              - condition: template
+                value_template: "{{ is_moving }}"
+            sequence:
+              - action: cover.stop_cover
+                target:
+                  entity_id: "{{ cover_entity }}"
+
+          # 如果当前认为“窗帘静止” → 本次按键 = 反向动作
+          - conditions:
+              - condition: template
+                value_template: "{{ not is_moving }}"
+            sequence:
+              - choose:
+                  # 上一次动作是 open → 这次关
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ is_state(last_action, 'open') }}"
+                    sequence:
+                      - action: cover.close_cover
+                        target:
+                          entity_id: "{{ cover_entity }}"
+
+                  # 上一次动作是 close → 这次开
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ is_state(last_action, 'close') }}"
+                    sequence:
+                      - action: cover.open_cover
+                        target:
+                          entity_id: "{{ cover_entity }}"
+
+                # 如果 last_action 还没有值（初始状态） → 默认先开
+                default:
+                  - action: cover.open_cover
+                    target:
+                      entity_id: "{{ cover_entity }}"

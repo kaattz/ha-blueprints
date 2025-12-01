@@ -1,0 +1,223 @@
+blueprint:
+  name: 智能阳光窗帘控制
+  description: |
+    控制指定的一组窗帘。
+    1. **阳光直射** -> 立即关闭。
+    2. **阳光消失** ->
+       - 若 **未配置** “人体传感器”：立即打开。
+       - 若 **配置了** “人体传感器”：需确认 **无人** 且 **超时** 后才打开。
+  domain: automation
+  input:
+    # --- 核心控制对象 ---
+    target_curtains:
+      name: 目标窗帘
+      description: 本次自动化要控制的窗帘。
+      selector:
+        target:
+          entity:
+            domain: cover
+
+    presence_sensor:
+      name: 人体存在传感器 (可选)
+      description: >
+        【不选】：阳光消失即开窗帘（适合客厅）。
+        【选择】：阳光消失且确认无人后才开窗帘（适合卧室）。
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+
+    # --- 传感器输入 ---
+    lux_sensor:
+      name: 光照传感器 (Lux)
+      description: 选择客厅或阳台的光照传感器。
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+    
+    weather_entity:
+      name: 天气实体
+      description: 用于判断是否下雨
+      selector:
+        entity:
+          domain: weather
+
+    # --- 算法参数 ---
+    window_azimuth:
+      name: 窗户方位角
+      description: 窗户正对的方向 (0=北, 90=东, 180=南, 270=西)。
+      default: 194
+      selector:
+        number:
+          min: 0
+          max: 360
+          mode: box
+    
+    azimuth_range:
+      name: 方位角范围 (+/-)
+      description: 阳光直射的角度宽度。
+      default: 80
+      selector:
+        number:
+          min: 0
+          max: 90
+          mode: box
+
+    min_elevation:
+      name: 最小太阳高度角
+      description: 太阳高度低于此角度时不触发。
+      default: 20
+      selector:
+        number:
+          min: 0
+          max: 90
+          mode: slider
+
+    lux_threshold:
+      name: 光照触发阈值
+      description: 高于此 Lux 值才认为是强光。
+      default: 13000
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+
+    # --- 时间设置 ---
+    no_sun_duration:
+      name: 无阳光等待时间 (分钟)
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: minutes
+
+    no_presence_duration:
+      name: 无人等待时间 (分钟)
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: minutes
+    
+    automation_switch:
+      name: 自动化总开关 (可选)
+      default: []
+      selector:
+        entity:
+          domain: input_boolean
+
+mode: restart
+
+trigger_variables:
+  lux_sensor_entity: !input lux_sensor
+  weather_entity_id: !input weather_entity
+  win_az: !input window_azimuth
+  az_range: !input azimuth_range
+  min_ele: !input min_elevation
+  lux_limit: !input lux_threshold
+  presence_entity: !input presence_sensor
+  no_presence_mins: !input no_presence_duration
+  auto_switch_entity: !input automation_switch
+
+trigger:
+  # 触发1：阳光直射
+  - platform: template
+    id: "sun_arrived"
+    value_template: >
+      {% set az = state_attr('sun.sun', 'azimuth') | float(0) %}
+      {% set el = state_attr('sun.sun', 'elevation') | float(0) %}
+      {% set lux = states(lux_sensor_entity) | float(0) %}
+      {% set is_rainy = is_state(weather_entity_id, 'rainy') %}
+      {{ (az > (win_az - az_range)) and (az < (win_az + az_range)) and (el > min_ele) and (not is_rainy) and (lux > lux_limit) }}
+
+  # 触发2：阳光消失 (持续 X 分钟)
+  - platform: template
+    id: "sun_gone_wait"
+    value_template: >
+      {% set az = state_attr('sun.sun', 'azimuth') | float(0) %}
+      {% set el = state_attr('sun.sun', 'elevation') | float(0) %}
+      {% set lux = states(lux_sensor_entity) | float(0) %}
+      {% set is_rainy = is_state(weather_entity_id, 'rainy') %}
+      {{ not ( (az > (win_az - az_range)) and (az < (win_az + az_range)) and (el > min_ele) and (not is_rainy) and (lux > lux_limit) ) }}
+    for:
+      minutes: !input no_sun_duration
+
+  # 触发3：无人 (持续 X 分钟)
+  - platform: template
+    id: "person_gone_wait"
+    value_template: >
+      {% if presence_entity != none %}
+        {{ is_state(presence_entity, 'off') }}
+      {% else %}
+        false
+      {% endif %}
+    for:
+      minutes: !input no_presence_duration
+
+condition:
+  - condition: sun
+    before: sunset
+    after: sunrise
+  
+  - condition: template
+    value_template: >
+      {# 如果 auto_switch_entity 不是空列表(即用户选了实体)，则检查是否为 on #}
+      {% if auto_switch_entity not in [none, [], ''] %}
+        {{ is_state(auto_switch_entity, 'on') }}
+      {% else %}
+        true
+      {% endif %}
+
+action:
+  - choose:
+      # --- 场景一：阳光直射 -> 关 ---
+      - conditions:
+          - condition: trigger
+            id: "sun_arrived"
+        sequence:
+          - action: cover.close_cover
+            target: !input target_curtains
+    
+    # --- 场景二：尝试打开 (默认) ---
+    default:
+      - sequence:
+          # 1. 基础门槛
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "sun_gone_wait"
+              - condition: trigger
+                id: "person_gone_wait"
+          
+          # 2. 核心检查：阳光必须确实没了
+          - condition: template
+            value_template: >
+              {% set az = state_attr('sun.sun', 'azimuth') | float(0) %}
+              {% set el = state_attr('sun.sun', 'elevation') | float(0) %}
+              {% set lux = states(lux_sensor_entity) | float(0) %}
+              {% set is_rainy = is_state(weather_entity_id, 'rainy') %}
+              {{ not ( (az > (win_az - az_range)) and (az < (win_az + az_range)) and (el > min_ele) and (not is_rainy) and (lux > lux_limit) ) }}
+          
+          # 3. 智能检查：如果有传感器，必须确认无人
+          - condition: template
+            value_template: >
+              {% if presence_entity in [none, [], ''] %}
+                true
+              {% else %}
+                {% if is_state(presence_entity, 'off') %}
+                  {% set last_changed = states[presence_entity].last_changed %}
+                  {% set duration_sec = no_presence_mins * 60 %}
+                  {% set time_diff = as_timestamp(now()) - as_timestamp(last_changed) %}
+                  {{ time_diff >= duration_sec }}
+                {% else %}
+                  false
+                {% endif %}
+              {% endif %}
+          
+          # 4. 执行打开
+          - action: cover.open_cover
+            target: !input target_curtains
