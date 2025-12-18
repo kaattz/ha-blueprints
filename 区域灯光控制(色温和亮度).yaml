@@ -1,0 +1,128 @@
+blueprint:
+  name: 区域灯光控制 (色温和亮度)
+  description: >
+    关联 Input Select 和 HA 的区域设置。
+    选择一个区域（如主卧），蓝图会自动控制该区域内所有亮着的实体灯。
+  domain: automation
+  input:
+    target_area:
+      name: 目标区域
+      description: 请选择要控制的区域（列表读取自“配置-区域与标签”）。
+      selector:
+        area: {} 
+    
+    brightness_input:
+      name: 亮度选择器
+      description: 控制亮度的 Input Select (支持 "50%", "关灯")。
+      selector:
+        entity:
+          domain: input_select
+    
+    color_temp_input:
+      name: 色温选择器
+      description: 控制色温的 Input Select (支持 "4000K", 整数)。
+      selector:
+        entity:
+          domain: input_select
+          
+    exclude_keyword:
+      name: 排除关键词
+      description: 实体ID中包含此关键词的灯将被忽略 (默认排除 iot_cn)。
+      default: "iot_cn"
+      selector:
+        text: {}
+
+# 同时监听亮度或色温的变化
+trigger:
+  - platform: state
+    entity_id: !input brightness_input
+    id: "trigger_brightness"
+  - platform: state
+    entity_id: !input color_temp_input
+    id: "trigger_temp"
+
+mode: single
+
+variables:
+  # 获取用户在蓝图中选定的区域ID (例如: master_bedroom)
+  area_var: !input target_area
+  exclude_var: !input exclude_keyword
+  
+  # 核心逻辑：
+  # area_entities(area_var) -> 自动获取该区域下的所有设备实体
+  # 筛选出 domain 是 light 的实体
+  # 排除包含 'group' 或 排除关键词 的实体
+  # 只选择状态为 'on' 的灯
+  on_lights: >-
+    {{ area_entities(area_var) 
+       | select('match', 'light\.') 
+       | reject('search', 'group') 
+       | reject('search', exclude_var) 
+       | select('is_state', 'on') 
+       | list }}
+
+action:
+  - if:
+      - condition: template
+        value_template: "{{ on_lights | length > 0 }}"
+    then:
+      - choose:
+          # --- 调整亮度 ---
+          - conditions:
+              - condition: trigger
+                id: "trigger_brightness"
+            sequence:
+              - variables:
+                  raw_brightness: "{{ trigger.to_state.state }}"
+                  # 解析亮度：处理 "关灯/OFF" 和 "%" 符号
+                  parsed_brightness: >-
+                    {% if raw_brightness in ['关灯', 'off', 'OFF'] %}
+                      0
+                    {% elif raw_brightness is string and '%' in raw_brightness %}
+                      {{ raw_brightness.replace('%', '') | int }}
+                    {% else %}
+                      {{ raw_brightness | int }}
+                    {% endif %}
+              - choose:
+                  # 亮度为0则关灯
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ parsed_brightness == 0 }}"
+                    sequence:
+                      - service: light.turn_off
+                        target:
+                          entity_id: "{{ on_lights }}"
+                default:
+                  # 否则调整亮度
+                  - service: light.turn_on
+                    target:
+                      entity_id: "{{ on_lights }}"
+                    data:
+                      brightness_pct: "{{ parsed_brightness }}"
+
+          # --- 调整色温 ---
+          - conditions:
+              - condition: trigger
+                id: "trigger_temp"
+            sequence:
+              - variables:
+                  raw_temp: "{{ trigger.to_state.state }}"
+                  # 解析色温：去除 "K"
+                  parsed_temp: >-
+                    {% if raw_temp is string and 'K' in raw_temp %}
+                      {{ raw_temp.replace('K', '') | int }}
+                    {% else %}
+                      {{ raw_temp | int }}
+                    {% endif %}
+              - service: light.turn_on
+                target:
+                  entity_id: "{{ on_lights }}"
+                data:
+                  color_temp_kelvin: "{{ parsed_temp }}"
+    else:
+      # 区域内没有灯亮着时的提示
+      - service: notify.persistent_notification
+        data:
+          title: 操作提示
+          # area_name(area_var) 会把 ID (master_bedroom) 转换成显示名称 (主卧)
+          message: "区域【{{ area_name(area_var) }}】中没有亮着的灯，操作已忽略。"

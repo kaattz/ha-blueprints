@@ -1,0 +1,541 @@
+blueprint:
+  name: 地暖全能主控
+  description: |
+    ### 核心逻辑：
+    1. **防抖与保护**：卧室加热时，客厅强制按 [当前室温 + 增温幅度] 陪跑。
+    2. **智能归位**：卧室停机后，客厅立即恢复该时段应有的设定温度。
+    3. **双重寒潮**：实时+预报双重判定，寒潮锁高水温，暖和切低水温。
+
+  domain: automation
+
+  input:
+    # =========================================
+    # 1. 核心设备与传感器
+    # =========================================
+    section_devices:
+      name: 核心设备与传感器
+      icon: mdi:devices
+      collapsed: false
+      input:
+        rinnai_boiler:
+          name: 林内锅炉实体 (Climate)
+          selector:
+            entity:
+              domain: climate
+
+        sensor_today_max:
+          name: 今日最高气温 (Sensor)
+          description: 选择 package 生成的 sensor.today_max_temp
+          selector:
+            entity:
+              domain: sensor
+              device_class: temperature
+
+        outdoor_temp_sensor:
+          name: 室外实时温度
+          selector:
+            entity:
+              domain: sensor
+              device_class: temperature
+
+        climate_living:
+          name: 客厅温控器 (主负载/旁通)
+          description: 水路最大的房间，用于保证最小流量。
+          selector:
+            entity:
+              domain: climate
+
+        climate_bedrooms:
+          name: 卧室温控器 (触发源)
+          selector:
+            entity:
+              domain: climate
+              multiple: true
+
+    # =========================================
+    # 2. 天气阈值与锅炉水温
+    # =========================================
+    section_weather_water:
+      name: 天气阈值与锅炉水温
+      icon: mdi:thermometer-water
+      collapsed: true
+      input:
+        threshold_realtime:
+          name: 【实时】寒潮阈值
+          default: 5.0
+          selector:
+            number:
+              min: -10
+              max: 15
+              step: 1
+              unit_of_measurement: "°C"
+
+        threshold_forecast:
+          name: 【预报】寒潮阈值 (最高温)
+          default: 12.0
+          selector:
+            number:
+              min: 0
+              max: 25
+              step: 1
+              unit_of_measurement: "°C"
+
+        temp_water_cold:
+          name: 寒潮模式水温 (高)
+          default: 50
+          selector:
+            number:
+              min: 40
+              max: 60
+              step: 1
+              unit_of_measurement: "°C"
+
+        temp_water_eco:
+          name: 节能模式水温 (低)
+          default: 40
+          selector:
+            number:
+              min: 35
+              max: 50
+              step: 1
+              unit_of_measurement: "°C"
+
+    # =========================================
+    # 3. 室内目标温度
+    # =========================================
+    section_room_temps:
+      name: 室内目标温度设置
+      icon: mdi:home-thermometer
+      collapsed: true
+      input:
+        temp_comfort:
+          name: 舒适温度
+          default: 22.5
+          selector:
+            number:
+              min: 15
+              max: 30
+              step: 0.5
+              unit_of_measurement: "°C"
+
+        temp_solar_save:
+          name: 节能温度 (白天)
+          default: 19.0
+          selector:
+            number:
+              min: 15
+              max: 30
+              step: 0.5
+              unit_of_measurement: "°C"
+
+        temp_sleep:
+          name: 睡眠温度 (深夜)
+          default: 20.5
+          selector:
+            number:
+              min: 15
+              max: 30
+              step: 0.5
+              unit_of_measurement: "°C"
+
+    # =========================================
+    # 4. 防启停 / 陪跑保护
+    # =========================================
+    section_protection:
+      name: 高级保护 (防启停)
+      icon: mdi:shield-check
+      collapsed: true
+      input:
+        temp_companion_delta:
+          name: 陪跑增温幅度
+          description: 卧室在真实加热(heating)时，客厅目标温度 = 当前室温 + 此数值
+          default: 2.0
+          selector:
+            number:
+              min: 0.5
+              max: 5.0
+              step: 0.5
+              unit_of_measurement: "°C"
+
+        companion_deadband:
+          name: 陪跑死区 (防来回跳)
+          description: 客厅目标温度超过“陪跑目标 - 死区”时不再重复下发
+          default: 0.5
+          selector:
+            number:
+              min: 0.2
+              max: 2.0
+              step: 0.1
+              unit_of_measurement: "°C"
+
+        allow_companion_at_night:
+          name: 深夜允许陪跑
+          default: false
+          selector:
+            boolean:
+
+    # =========================================
+    # 5. 时间日程
+    # =========================================
+    section_schedule:
+      name: 时间日程设置
+      icon: mdi:clock-outline
+      collapsed: true
+      input:
+        time_morning:
+          name: 早晨舒适开始时间
+          default: "06:00:00"
+          selector:
+            time:
+        time_day:
+          name: 白天模式开始时间
+          default: "09:00:00"
+          selector:
+            time:
+        time_evening:
+          name: 晚间舒适开始时间
+          default: "17:00:00"
+          selector:
+            time:
+        time_night:
+          name: 深夜睡眠开始时间
+          default: "23:00:00"
+          selector:
+            time:
+
+    # =========================================
+    # 6. 锁定与延时 helper
+    # =========================================
+    section_helpers:
+      name: 锁定与延时 (必配)
+      icon: mdi:timer-lock
+      collapsed: true
+      input:
+        water_last_change:
+          name: 水温最后一次切换时间 (input_datetime)
+          description: 需要你新建一个 input_datetime（日期+时间）
+          selector:
+            entity:
+              domain: input_datetime
+
+        water_change_lock_minutes:
+          name: 水温切换锁定分钟数
+          default: 30
+          selector:
+            number:
+              min: 5
+              max: 180
+              step: 5
+              unit_of_measurement: "min"
+
+        boiler_off_delay_minutes:
+          name: 全部房间 off 后，锅炉延时关机分钟数
+          default: 20
+          selector:
+            number:
+              min: 5
+              max: 120
+              step: 5
+              unit_of_measurement: "min"
+
+mode: queued
+max: 10
+max_exceeded: silent
+
+variables:
+  living_cl: !input climate_living
+  bedrooms_cl: !input climate_bedrooms
+  outdoor_sensor: !input outdoor_temp_sensor
+  today_max_sensor: !input sensor_today_max
+  boiler: !input rinnai_boiler
+
+  limit_real: !input threshold_realtime
+  limit_day: !input threshold_forecast
+
+  water_high: !input temp_water_cold
+  water_low: !input temp_water_eco
+
+  t_comfort: !input temp_comfort
+  t_solar: !input temp_solar_save
+  t_sleep: !input temp_sleep
+
+  temp_plus: !input temp_companion_delta
+  companion_db: !input companion_deadband
+  allow_night_companion: !input allow_companion_at_night
+
+  t_m: !input time_morning
+  t_d: !input time_day
+  t_e: !input time_evening
+  t_n: !input time_night
+
+  water_last_dt: !input water_last_change
+  water_lock_min: !input water_change_lock_minutes
+  boiler_off_delay_min: !input boiler_off_delay_minutes
+
+  # ---- 寒潮判定：实时或预报任一满足即寒潮 ----
+  is_cold: >
+    {% set current = states(outdoor_sensor) | float(10) %}
+    {% set today_max = states(today_max_sensor) | float(10) %}
+    {% set lim_r = limit_real | float %}
+    {% set lim_d = limit_day | float %}
+    {{ current < lim_r or today_max < lim_d }}
+
+  # ---- 当前时段目标温度（寒潮全天舒适，否则按日程）----
+  schedule_target_temp: >
+    {% if is_cold %}
+      {{ t_comfort | float }}
+    {% else %}
+      {% if now().strftime('%H:%M:%S') >= (t_n|string) or now().strftime('%H:%M:%S') < (t_m|string) %}
+        {{ t_sleep | float }}
+      {% elif now().strftime('%H:%M:%S') >= (t_d|string) and now().strftime('%H:%M:%S') < (t_e|string) %}
+        {{ t_solar | float }}
+      {% else %}
+        {{ t_comfort | float }}
+      {% endif %}
+    {% endif %}
+
+  desired_water_temp: >
+    {{ (water_high if is_cold else water_low) | float }}
+
+  # ---- 真实需求：state=heat 且 hvac_action=heating（缺失 hvac_action 的设备默认 false）----
+  bedrooms_heating_count: >
+    {{
+      expand(bedrooms_cl)
+      | selectattr('state','eq','heat')
+      | selectattr('attributes.hvac_action','defined')
+      | selectattr('attributes.hvac_action','eq','heating')
+      | list | count
+    }}
+
+  living_heating: >
+    {{
+      is_state(living_cl,'heat')
+      and (state_attr(living_cl,'hvac_action') == 'heating')
+    }}
+
+  any_room_heat_mode_count: >
+    {{
+      expand(bedrooms_cl, living_cl)
+      | selectattr('state','eq','heat')
+      | list | count
+    }}
+
+  # 新增：所有房间真实加热计数 (hvac_action=heating)
+  any_room_real_heating_count: >
+    {{
+      expand(bedrooms_cl, living_cl)
+      | selectattr('state','eq','heat')
+      | selectattr('attributes.hvac_action','defined')
+      | selectattr('attributes.hvac_action','eq','heating')
+      | list | count
+    }}
+
+trigger:
+  # 1) 日程触发
+  - platform: time
+    at: !input time_morning
+    id: schedule_apply
+  - platform: time
+    at: !input time_day
+    id: schedule_apply
+  - platform: time
+    at: !input time_evening
+    id: schedule_apply
+  - platform: time
+    at: !input time_night
+    id: schedule_apply
+
+  # 2) 房间模式变化（只看 state heat/off，避免 hvac_action 抖动）
+  - platform: state
+    entity_id: !input climate_living
+    to:
+      - "heat"
+      - "off"
+    id: room_mode_change
+  - platform: state
+    entity_id: !input climate_bedrooms
+    to:
+      - "heat"
+      - "off"
+    id: room_mode_change
+
+  # 新增：监听 hvac_action 变化 (Idle <-> Heating)
+  - platform: state
+    entity_id: !input climate_living
+    attribute: hvac_action
+    id: room_action_change
+  - platform: state
+    entity_id: !input climate_bedrooms
+    attribute: hvac_action
+    id: room_action_change
+
+  # 3) 天气变化
+  - platform: state
+    entity_id:
+      - !input outdoor_temp_sensor
+      - !input sensor_today_max
+    id: weather_change
+
+  # 4) 锅炉状态检查（定时兜底）
+  - platform: time_pattern
+    minutes: "/15"
+    id: periodic_check
+
+action:
+  - choose:
+      # ==========================================================
+      # A) 日程：给卧室下发“时段目标温度”
+      #    客厅：只有在“卧室没有真实在烧”时才跟随时段温度（避免抢陪跑）
+      # ==========================================================
+      - conditions:
+          - condition: trigger
+            id:
+              - schedule_apply
+              - room_action_change
+        sequence:
+          - service: climate.set_temperature
+            target:
+              entity_id: !input climate_bedrooms
+            data:
+              hvac_mode: "heat"
+              temperature: "{{ schedule_target_temp }}"
+
+          - if:
+              - condition: template
+                value_template: "{{ bedrooms_heating_count | int(0) == 0 }}"
+            then:
+              - service: climate.set_temperature
+                target:
+                  entity_id: !input climate_living
+                data:
+                  hvac_mode: "heat"
+                  temperature: "{{ schedule_target_temp }}"
+
+      # ==========================================================
+      # B) 陪跑：只要有卧室“真实在烧(heating)”，客厅强制陪跑
+      #    + 死区：避免重复 set_temperature
+      #    + 深夜可开关
+      # ==========================================================
+      - conditions:
+          - condition: template
+            value_template: "{{ bedrooms_heating_count | int(0) > 0 }}"
+          - condition: template
+            value_template: >
+              {% set now_s = now().strftime('%H:%M:%S') %}
+              {% set is_night = (now_s >= (t_n|string) or now_s < (t_m|string)) %}
+              {{ (not is_night) or (is_night and (allow_night_companion | bool)) }}
+        sequence:
+          - variables:
+              living_curr: "{{ state_attr(living_cl,'current_temperature') | float(20) }}"
+              companion_target: "{{ (state_attr(living_cl,'current_temperature') | float(20)) + (temp_plus | float) }}"
+              living_set: "{{ state_attr(living_cl,'temperature') | float(0) }}"
+          - if:
+              - condition: template
+                value_template: >
+                  {{ (not is_state(living_cl,'heat'))
+                     or (living_set < (companion_target - (companion_db | float))) }}
+            then:
+              - service: climate.set_temperature
+                target:
+                  entity_id: !input climate_living
+                data:
+                  hvac_mode: "heat"
+                  temperature: "{{ companion_target }}"
+
+      # ==========================================================
+      # C) 归位：卧室不再真实加热后，若客厅“看起来像陪跑过”(设定温度明显高于时段目标)，则归位
+      # ==========================================================
+      - conditions:
+          - condition: template
+            value_template: "{{ bedrooms_heating_count | int(0) == 0 }}"
+        sequence:
+          - variables:
+              living_set: "{{ state_attr(living_cl,'temperature') | float(0) }}"
+              target: "{{ schedule_target_temp | float }}"
+          - if:
+              - condition: template
+                value_template: "{{ living_set > (target + 0.3) }}"
+            then:
+              - service: climate.set_temperature
+                target:
+                  entity_id: !input climate_living
+                data:
+                  hvac_mode: "heat"
+                  temperature: "{{ schedule_target_temp }}"
+
+  # ==========================================================
+  # D) 锅炉开关：只看“房间 heat 模式数”，避免 hvac_action 抖动
+  #    开：任一房间 heat
+  #    关：全部 off 后延时 N 分钟，并二次校验
+  # ==========================================================
+  - choose:
+      # 开锅炉
+      - conditions:
+          - condition: template
+            value_template: "{{ any_room_real_heating_count | int(0) > 0 }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input rinnai_boiler
+                state: "heat"
+        sequence:
+          - service: climate.set_hvac_mode
+            target:
+              entity_id: !input rinnai_boiler
+            data:
+              hvac_mode: "heat"
+
+      # 关锅炉
+      - conditions:
+          - condition: template
+            value_template: "{{ any_room_real_heating_count | int(0) == 0 }}"
+          - condition: state
+            entity_id: !input rinnai_boiler
+            state: "heat"
+        sequence:
+          - delay:
+              minutes: "{{ boiler_off_delay_min | int(20) }}"
+          - condition: template
+            value_template: "{{ any_room_real_heating_count | int(0) == 0 }}"
+          - service: climate.set_hvac_mode
+            target:
+              entity_id: !input rinnai_boiler
+            data:
+              hvac_mode: "off"
+
+  # ==========================================================
+  # E) 水温控制：锅炉 heat 时才管；且水温切换有锁（默认 30min）
+  # ==========================================================
+  - if:
+      - condition: state
+        entity_id: !input rinnai_boiler
+        state: "heat"
+    then:
+      - variables:
+          # 获取 input_datetime 的原始字符串状态
+          last_s: "{{ states(water_last_dt) }}"
+          # 修复点：直接在计算逻辑中转换时间对象，避免 Jinja 将结果变回字符串
+          lock_ok: >
+            {% set t = as_datetime(last_s) %}
+            {% if t is none %}
+              true
+            {% else %}
+              {{ (now() - t).total_seconds() > ((water_lock_min | float) * 60) }}
+            {% endif %}
+          boiler_set: "{{ state_attr(boiler,'temperature') | float(0) }}"
+          desired: "{{ desired_water_temp | float }}"
+      - if:
+          - condition: template
+            value_template: "{{ lock_ok and (boiler_set | float(0) != desired | float) }}"
+        then:
+          - service: climate.set_temperature
+            target:
+              entity_id: !input rinnai_boiler
+            data:
+              hvac_mode: "heat"
+              temperature: "{{ desired }}"
+          - service: input_datetime.set_datetime
+            target:
+              entity_id: !input water_last_change
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"

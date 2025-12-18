@@ -1,0 +1,148 @@
+blueprint:
+  name: 电动窗帘/窗户电池自动充电管家
+  description: |
+    ### 功能：
+    自动管理电动窗帘或电动窗户的电池充电，并通过指定脚本发送通知。
+    
+    1. **自动开始**：电量低 -> 开启插座 -> 调用脚本通知。
+    2. **自动停止**：电量高 -> 关闭插座 -> 调用脚本通知。
+    3. **超时保护**：时间过长 -> 强制关闭 -> 调用脚本通知 (Warning级别)。
+
+  domain: automation
+  input:
+    battery_sensor:
+      name: 电池电量传感器
+      description: 窗帘或电动窗的电量实体 (0-100%)
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+
+    smart_plug:
+      name: 充电插座
+      description: 控制充电器的智能插座
+      selector:
+        entity:
+          domain: switch
+
+    notify_script:
+      name: 通知脚本
+      description: 用于发送通知的脚本 (例如 script.alert_notify)
+      selector:
+        entity:
+          domain: script
+
+    low_threshold:
+      name: 开始充电电量 (%)
+      description: 低于此电量时开始充电 (建议 15-20%)
+      default: 20
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    high_threshold:
+      name: 停止充电电量 (%)
+      description: 高于此电量时停止充电 (建议 90-100%)
+      default: 92
+      selector:
+        number:
+          min: 50
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    max_charge_time:
+      name: 最长充电时间 (超时保护)
+      description: 无论电量是否充满，插座开启超过此时间强制关闭。
+      default:
+        hours: 4
+        minutes: 0
+        seconds: 0
+      selector:
+        duration:
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  # 触发器 1: 电量低，开始充电
+  - platform: numeric_state
+    entity_id: !input battery_sensor
+    below: !input low_threshold
+    id: "start_charge"
+
+  # 触发器 2: 电量高，停止充电
+  - platform: numeric_state
+    entity_id: !input battery_sensor
+    above: !input high_threshold
+    id: "stop_charge"
+
+  # 触发器 3: 超时保护，强制停止
+  - platform: state
+    entity_id: !input smart_plug
+    to: "on"
+    for: !input max_charge_time
+    id: "safety_stop"
+
+action:
+  - choose:
+      # --- 场景 A: 开始充电 ---
+      - conditions:
+          - condition: trigger
+            id: "start_charge"
+          # 额外检查：防止插座已经在开了重复发指令
+          - condition: state
+            entity_id: !input smart_plug
+            state: "off"
+        sequence:
+          - action: switch.turn_on
+            target:
+              entity_id: !input smart_plug
+          # 调用指定的通知脚本
+          - action: !input notify_script
+            data:
+              title: "🔌 窗帘开始充电"
+              message: "检测到电量低于 {{ state_attr(trigger.entity_id, 'friendly_name') | default('设备') }} 的设定阈值，已开启充电插座。"
+              level: "info"
+
+      # --- 场景 B: 停止充电 (充满 或 超时) ---
+      - conditions:
+          - condition: trigger
+            id:
+              - "stop_charge"
+              - "safety_stop"
+          # 额外检查：确保插座是开着的才去关
+          - condition: state
+            entity_id: !input smart_plug
+            state: "on"
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: !input smart_plug
+          # 调用指定的通知脚本
+          - action: !input notify_script
+            data:
+              title: >
+                {% if trigger.id == 'safety_stop' %}
+                  ⚠️ 窗帘充电超时保护
+                {% else %}
+                  🔋 窗帘充电结束
+                {% endif %}
+              message: >
+                设备：{{ state_attr(trigger.entity_id, 'friendly_name') | default('设备') }}
+                {% if trigger.id == 'safety_stop' %}
+                  原因：充电时间超过设定时长，已强制断电以保护电池。请检查充电器连接是否正常。
+                {% else %}
+                  原因：电池电量已充满，自动断电。
+                {% endif %}
+              level: >
+                {% if trigger.id == 'safety_stop' %}
+                  warning
+                {% else %}
+                  info
+                {% endif %}

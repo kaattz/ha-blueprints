@@ -1,0 +1,657 @@
+blueprint:
+  name: 卫生间智能控制
+  description: |
+    ### 🛁 简介
+    全功能卫生间自动化。支持多区域灯光跟随、水浸联动洗澡模式、电动窗控制及智能除湿。
+
+     ### ✨ 核心功能
+    1. **主区域控制**：进门自动开主灯（洗手台）、根据温度开循环泵、浴霸自动换气。
+    2. **多区域跟随**：淋浴区、扩展区人来灯亮。
+    3. **水浸联动**：淋浴区检测到水流自动标记“洗澡模式”，低温一直开循环泵、自动开启暖风、关窗。
+    4. **智能离开**：
+       - 灯光：无人延时关闭 (时间可配置)。
+       - 百叶窗：支持三种模式（总是打开、智能判断、完全禁用）。
+    5. **智能除湿**：洗澡结束后，自动运行除湿流程并控制电动窗辅助排气。
+
+  domain: automation
+  input:
+    section_zones:
+      name: 区域与灯光绑定
+      icon: mdi:floor-plan
+      collapsed: false
+      input:
+        illuminance_sensor:
+          name: 光照传感器
+          selector:
+            entity:
+              domain: sensor
+              device_class: illuminance
+        illuminance_threshold:
+          name: 开灯光照阈值 (lx)
+          default: 40
+          selector:
+            number:
+              min: 0
+              max: 1000
+        setting_light_off_delay:
+          name: 无人关灯延时 (秒)
+          default: 30
+          selector:
+            number:
+              min: 5
+              max: 300
+              unit_of_measurement: seconds
+        main_presence_sensor:
+          name: "[主区域] 人体传感器"
+          selector:
+            entity:
+              domain: binary_sensor
+              device_class: [occupancy, motion]
+        light_sink_area:
+          name: "[主区域] 灯光"
+          selector:
+            target:
+              entity:
+                domain: light
+        shower_presence_sensor:
+          name: "[淋浴区] 人体传感器"
+          selector:
+            entity:
+              domain: binary_sensor
+              device_class: [occupancy, motion]
+        water_leak_sensor:
+          name: "[淋浴区] 水浸传感器"
+          description: "检测到水流时，同时打开两个标志位。"
+          selector:
+            entity:
+              domain: binary_sensor
+              device_class: moisture
+        light_shower_area:
+          name: "[淋浴区] 灯光"
+          selector:
+            target:
+              entity:
+                domain: light
+        zone_a_presence_sensor:
+          name: "[扩展区 A] 人体传感器"
+          default: []
+          selector:
+            entity:
+              domain: binary_sensor
+              device_class: [occupancy, motion]
+        light_zone_a:
+          name: "[扩展区 A] 灯光"
+          default: {}
+          selector:
+            target:
+              entity:
+                domain: light
+        zone_b_presence_sensor:
+          name: "[扩展区 B] 人体传感器"
+          default: []
+          selector:
+            entity:
+              domain: binary_sensor
+              device_class: [occupancy, motion]
+        light_zone_b:
+          name: "[扩展区 B] 灯光"
+          default: {}
+          selector:
+            target:
+              entity:
+                domain: light
+
+    section_helpers:
+      name: 核心标志位与互斥
+      description: 必须配置标志位。如果是双卫共用泵，请配置互斥锁。
+      icon: mdi:toggle-switch
+      collapsed: false
+      input:
+        input_bool_active:
+          name: 🔴 标志位 1：[本区域正在洗澡]
+          description: "代表'水正在流'。"
+          selector:
+            entity:
+              domain: input_boolean
+        input_bool_post:
+          name: 🔵 标志位 2：[本区域洗澡后续]
+          description: "代表'洗过澡了'。"
+          selector:
+            entity:
+              domain: input_boolean
+        input_other_shower_active:
+          name: 🔒 [互斥锁] 其他区域正在洗澡
+          description: "选择【另一个卫生间】的 [正在洗澡] 标志位。若该项为 On，本自动化绝不关泵。"
+          default: []
+          selector:
+            entity:
+              domain: input_boolean
+              multiple: true
+        # ------------------
+        input_get_up_mode:
+          name: "[辅助] 起床模式"
+          default: []
+          selector:
+            entity:
+              multiple: true
+              domain: input_boolean
+
+    section_env:
+      name: 环境与硬件设施
+      icon: mdi:window-shutter-auto
+      collapsed: true
+      input:
+        switch_pump:
+          name: 循环泵开关
+          selector:
+            entity:
+              domain: switch
+        setting_pump_temp_threshold:
+          name: 循环泵开启温度 (°C)
+          default: 28
+          selector:
+            number:
+              min: -20
+              max: 40
+        pump_max_runtime:
+          name: 循环泵日常运行时间 (分钟)
+          description: "仅在[正在洗澡]标志位为 OFF 时生效。"
+          default: 1
+          selector:
+            number:
+              min: 0.5
+              max: 10
+              step: 0.5
+              unit_of_measurement: min
+        cover_blinds:
+          name: 百叶帘
+          selector:
+            entity:
+              domain: cover
+        setting_blind_auto_schedule:
+          name: 启用定时开关窗帘
+          default: false
+          selector:
+            boolean: {}
+        setting_blind_open_time:
+          name: 窗帘开启时间
+          default: "08:00:00"
+          selector:
+            time: {}
+        setting_blind_close_time:
+          name: 窗帘关闭时间
+          default: "17:00:00"
+          selector:
+            time: {}
+        setting_blind_mode:
+          name: 🪟 百叶帘离开模式
+          description: |
+            选择人走后的窗帘动作：
+            - **总是打开**: 只要人走，立即打开窗帘。
+            - **智能模式**: 在设定的开启/关闭时间段内，人走才会打开窗帘。
+            - **禁用**: 自动化绝不操作窗帘。
+          default: "smart"
+          selector:
+            select:
+              options:
+                - label: "总是打开 (Always Open)"
+                  value: "always"
+                - label: "智能模式 (Smart - Day Only)"
+                  value: "smart"
+                - label: "禁用 (Disabled)"
+                  value: "disabled"
+        cover_window:
+          name: 电动窗 (排气)
+          selector:
+            entity:
+              domain: cover
+        fresh_air_status:
+          name: "[可选] 新风系统"
+          default: []
+          selector:
+            entity:
+              domain: [fan, switch, binary_sensor, sensor, input_boolean]
+        setting_window_close_pos:
+          name: 关窗保留位置 (%)
+          default: 15
+          selector:
+            number:
+              min: 0
+              max: 100
+              unit_of_measurement: "%"
+        bathroom_humidity_sensor:
+          name: 卫生间湿度
+          selector:
+            entity:
+              domain: sensor
+              device_class: humidity
+        reference_humidity_sensor:
+          name: 客厅参考湿度
+          selector:
+            entity:
+              domain: sensor
+              device_class: humidity
+        setting_humidity_diff_threshold:
+          name: 湿度差关闭阈值 (%)
+          description: "当卫生间与参考湿度差值低于此值时，停止除湿。"
+          default: 5
+          selector:
+            number:
+              min: 0
+              max: 15
+              step: 0.5
+              unit_of_measurement: "%"
+
+    section_heater:
+      name: 浴霸相关
+      icon: mdi:weather-windy
+      collapsed: true
+      input:
+        setting_auto_heat_temp:
+          name: 自动暖风触发温度 (°C)
+          default: 22
+          selector:
+            number:
+              min: -20
+              max: 40
+        weather_temp_sensor:
+          name: 室外温度
+          selector:
+            entity:
+              domain: sensor
+        master_status_sensor:
+          name: 浴霸状态传感器
+          selector:
+            entity:
+              domain: sensor
+        script_ventilate:
+          name: 脚本：换气
+          selector:
+            entity:
+              domain: script
+        script_cool_drying:
+          name: 脚本：凉干燥
+          selector:
+            entity:
+              domain: script
+        script_heating:
+          name: 脚本：暖风
+          selector:
+            entity:
+              domain: script
+        script_power_off:
+          name: 脚本：全关
+          selector:
+            entity:
+              domain: script
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  # 触发 1-4: 区域进入
+  - platform: state
+    entity_id: !input main_presence_sensor
+    from: "off"
+    to: "on"
+    id: "entry_main"
+  - platform: state
+    entity_id: !input shower_presence_sensor
+    from: "off"
+    to: "on"
+    id: "entry_shower"
+  - platform: state
+    entity_id: !input zone_a_presence_sensor
+    from: "off"
+    to: "on"
+    id: "entry_zone_a"
+  - platform: state
+    entity_id: !input zone_b_presence_sensor
+    from: "off"
+    to: "on"
+    id: "entry_zone_b"
+
+  # 触发 5: 水浸触发 (开始洗澡)
+  - platform: state
+    entity_id: !input water_leak_sensor
+    from: "off"
+    to: "on"
+    for:
+      seconds: 3
+    id: "shower_start"
+
+  # 触发 8-9: 窗帘定时
+  - platform: time
+    at: !input setting_blind_open_time
+    id: "trigger_blind_open"
+  - platform: time
+    at: !input setting_blind_close_time
+    id: "trigger_blind_close"
+
+  # 触发 6: 循环泵超时
+  - platform: state
+    entity_id: !input switch_pump
+    to: "on"
+    for:
+      minutes: !input pump_max_runtime
+    id: "pump_timeout"
+
+  # 触发 7: 全屋离开检查
+  - platform: state
+    entity_id: !input main_presence_sensor
+    to: "off"
+    id: "leave_check"
+  - platform: state
+    entity_id: !input shower_presence_sensor
+    to: "off"
+    id: "leave_check"
+  - platform: state
+    entity_id: !input zone_a_presence_sensor
+    to: "off"
+    id: "leave_check"
+  - platform: state
+    entity_id: !input zone_b_presence_sensor
+    to: "off"
+    id: "leave_check"
+
+action:
+  - choose:
+      # A. 洗澡开始
+      - conditions:
+          - condition: trigger
+            id: "shower_start"
+        sequence:
+          - parallel:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: !input input_bool_active
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: !input input_bool_post
+          - if:
+              - condition: numeric_state
+                entity_id: !input weather_temp_sensor
+                below: !input setting_auto_heat_temp
+            then:
+              - action: script.turn_on
+                target:
+                  entity_id: !input script_heating
+              - action: cover.close_cover
+                target:
+                  entity_id: !input cover_window
+
+      # B. 区域进入逻辑
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "entry_main"
+              - condition: trigger
+                id: "entry_shower"
+              - condition: trigger
+                id: "entry_zone_a"
+              - condition: trigger
+                id: "entry_zone_b"
+        sequence:
+          - if:
+              - condition: numeric_state
+                entity_id: !input weather_temp_sensor
+                below: !input setting_pump_temp_threshold
+            then:
+              - action: switch.turn_on
+                target:
+                  entity_id: !input switch_pump
+          - if:
+              - condition: template
+                value_template: "{{ states(var_inputs.master_status_sensor) != '干燥' }}"
+            then:
+              - action: script.turn_on
+                target:
+                  entity_id: !input script_ventilate
+          # 灯光逻辑
+          - if:
+              - condition: trigger
+                id: "entry_main"
+              - condition: numeric_state
+                entity_id: !input illuminance_sensor
+                below: !input illuminance_threshold
+              - condition: template
+                value_template: >
+                  {{ expand(var_inputs.input_get_up_mode) | selectattr('state', 'eq', 'on') | list | count == 0 }}
+            then:
+              - action: light.turn_on
+                target: !input light_sink_area
+          - if:
+              - condition: trigger
+                id: "entry_shower"
+              - condition: template
+                value_template: "{{ expand(var_inputs.input_get_up_mode) | selectattr('state', 'eq', 'on') | list | count == 0 }}"
+              - condition: template
+                value_template: "{{ is_state(var_inputs.light_sink_area.entity_id, 'on') if var_inputs.light_sink_area.entity_id is string else expand(var_inputs.light_sink_area.entity_id) | selectattr('state','eq','on') | list | count > 0 }}"
+            then:
+              - action: light.turn_on
+                target: !input light_shower_area
+          - if:
+              - condition: trigger
+                id: "entry_zone_a"
+              - condition: template
+                value_template: "{{ expand(var_inputs.input_get_up_mode) | selectattr('state', 'eq', 'on') | list | count == 0 }}"
+              - condition: template
+                value_template: "{{ is_state(var_inputs.light_sink_area.entity_id, 'on') if var_inputs.light_sink_area.entity_id is string else expand(var_inputs.light_sink_area.entity_id) | selectattr('state','eq','on') | list | count > 0 }}"
+            then:
+              - action: light.turn_on
+                target: !input light_zone_a
+          - if:
+              - condition: trigger
+                id: "entry_zone_b"
+              - condition: template
+                value_template: "{{ expand(var_inputs.input_get_up_mode) | selectattr('state', 'eq', 'on') | list | count == 0 }}"
+              - condition: template
+                value_template: "{{ is_state(var_inputs.light_sink_area.entity_id, 'on') if var_inputs.light_sink_area.entity_id is string else expand(var_inputs.light_sink_area.entity_id) | selectattr('state','eq','on') | list | count > 0 }}"
+            then:
+              - action: light.turn_on
+                target: !input light_zone_b
+
+      # C. 泵超时逻辑
+      - conditions:
+          - condition: trigger
+            id: "pump_timeout"
+          # 1. 我自己不在洗澡
+          - condition: state
+            entity_id: !input input_bool_active
+            state: "off"
+          # 2. 别的房间也不在洗澡 (互斥锁)
+          - condition: template
+            value_template: >
+              {{ expand(var_inputs.input_other_shower_active) | selectattr('state', 'eq', 'on') | list | count == 0 }}
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: !input switch_pump
+
+      # D. 全屋离开逻辑 (人走了)
+      - conditions:
+          - condition: trigger
+            id: "leave_check"
+          - condition: template
+            value_template: >
+              {% set sensors = [var_inputs.main_presence_sensor, var_inputs.shower_presence_sensor] %}
+              {% if var_inputs.zone_a_presence_sensor is string %}{% set sensors = sensors + [var_inputs.zone_a_presence_sensor] %}{% endif %}
+              {% if var_inputs.zone_b_presence_sensor is string %}{% set sensors = sensors + [var_inputs.zone_b_presence_sensor] %}{% endif %}
+              {{ sensors | select('is_state', 'on') | list | count == 0 }}
+        sequence:
+          # 1. 立即关闭 [本区域正在洗澡] 标志位
+          - action: input_boolean.turn_off
+            target:
+              entity_id: !input input_bool_active
+
+          # 2. 尝试关泵 (仅当其他区域也没在洗澡时)
+          - if:
+              - condition: template
+                value_template: >
+                  {{ expand(var_inputs.input_other_shower_active) | selectattr('state', 'eq', 'on') | list | count == 0 }}
+            then:
+              - action: switch.turn_off
+                target:
+                  entity_id: !input switch_pump
+
+          # 3. 后续处理 (关灯 + 除湿)
+          - parallel:
+              # 关灯/窗帘
+              - sequence:
+                  - delay:
+                      seconds: !input setting_light_off_delay
+                  - action: light.turn_off
+                    target: !input light_sink_area
+                  - action: light.turn_off
+                    target: !input light_shower_area
+                  - if:
+                      - condition: template
+                        value_template: "{{ var_inputs.light_zone_a != {} }}"
+                    then:
+                      - action: light.turn_off
+                        target: !input light_zone_a
+                  - if:
+                      - condition: template
+                        value_template: "{{ var_inputs.light_zone_b != {} }}"
+                    then:
+                      - action: light.turn_off
+                        target: !input light_zone_b
+
+                  # 核心修改：百叶帘控制逻辑
+                  - choose:
+                      # 模式1: 总是打开 (Always Open)
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ var_inputs.setting_blind_mode == 'always' }}"
+                        sequence:
+                          - action: cover.open_cover
+                            target:
+                              entity_id: !input cover_blinds
+                      # 模式2: 智能模式 (Smart - Day Only)
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ var_inputs.setting_blind_mode == 'smart' }}"
+                          - condition: time
+                            after: !input setting_blind_open_time
+                            before: !input setting_blind_close_time
+                        sequence:
+                          - action: cover.open_cover
+                            target:
+                              entity_id: !input cover_blinds
+                      # 模式3: 禁用 (Disabled) - 默认不执行任何操作
+
+              # 除湿逻辑
+              - sequence:
+                  - choose:
+                      - conditions:
+                          - condition: state
+                            entity_id: !input input_bool_post
+                            state: "off"
+                        sequence:
+                          - delay: "00:02:00"
+                          - action: script.turn_on
+                            target:
+                              entity_id: !input script_power_off
+
+                      - conditions:
+                          - condition: state
+                            entity_id: !input input_bool_post
+                            state: "on"
+                        sequence:
+                          - action: cover.open_cover
+                            target:
+                              entity_id: !input cover_window
+                          - action: script.turn_on
+                            target:
+                              entity_id: !input script_cool_drying
+                          - wait_template: >-
+                              {{ (states(var_inputs.reference_humidity_sensor) | float(0) -
+                              states(var_inputs.bathroom_humidity_sensor) | float(0)) | abs <= var_inputs.setting_humidity_diff_threshold }}
+                            timeout: "00:14:58"
+                            continue_on_timeout: true
+                          - if:
+                              - condition: template
+                                value_template: >-
+                                  {{ (states(var_inputs.reference_humidity_sensor) | float(0) -
+                                  states(var_inputs.bathroom_humidity_sensor) | float(0)) | abs > var_inputs.setting_humidity_diff_threshold }}
+                            then:
+                              - action: script.turn_on
+                                target:
+                                  entity_id: !input script_ventilate
+                              - wait_template: >-
+                                  {{ (states(var_inputs.reference_humidity_sensor) | float(0) -
+                                  states(var_inputs.bathroom_humidity_sensor) | float(0)) | abs <= var_inputs.setting_humidity_diff_threshold }}
+                                timeout: "01:30:00"
+                                continue_on_timeout: true
+                          # 先关闭标记位，因为关窗和关窗帘会触发人在传感器，导致重新进入自动化
+                          - action: input_boolean.turn_off
+                            target:
+                              entity_id: !input input_bool_post
+
+                          - action: script.turn_on
+                            target:
+                              entity_id: !input script_power_off
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: "{{ var_inputs.fresh_air_status != [] and states(var_inputs.fresh_air_status) in ['on', 'high', 'low', 'auto'] }}"
+                                sequence:
+                                  - action: cover.set_cover_position
+                                    target:
+                                      entity_id: !input cover_window
+                                    data:
+                                      position: !input setting_window_close_pos
+                            default:
+                              - if:
+                                  - condition: numeric_state
+                                    entity_id: !input weather_temp_sensor
+                                    below: !input setting_auto_heat_temp
+                                then:
+                                  - action: cover.close_cover
+                                    target:
+                                      entity_id: !input cover_window
+
+
+      # E. 窗帘定时开启
+      - conditions:
+          - condition: trigger
+            id: "trigger_blind_open"
+          - condition: template
+            value_template: "{{ var_inputs.setting_blind_auto_schedule }}"
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: !input cover_blinds
+
+      # F. 窗帘定时关闭
+      - conditions:
+          - condition: trigger
+            id: "trigger_blind_close"
+          - condition: template
+            value_template: "{{ var_inputs.setting_blind_auto_schedule }}"
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: !input cover_blinds
+
+variables:
+  var_inputs:
+    main_presence_sensor: !input main_presence_sensor
+    shower_presence_sensor: !input shower_presence_sensor
+    zone_a_presence_sensor: !input zone_a_presence_sensor
+    zone_b_presence_sensor: !input zone_b_presence_sensor
+    master_status_sensor: !input master_status_sensor
+    reference_humidity_sensor: !input reference_humidity_sensor
+    bathroom_humidity_sensor: !input bathroom_humidity_sensor
+    light_sink_area: !input light_sink_area
+    light_zone_a: !input light_zone_a
+    light_zone_b: !input light_zone_b
+    input_get_up_mode: !input input_get_up_mode
+    setting_blind_mode: !input setting_blind_mode
+    setting_blind_auto_schedule: !input setting_blind_auto_schedule
+    fresh_air_status: !input fresh_air_status
+    input_bool_active: !input input_bool_active
+    input_bool_post: !input input_bool_post
+    input_other_shower_active: !input input_other_shower_active
+    setting_humidity_diff_threshold: !input setting_humidity_diff_threshold

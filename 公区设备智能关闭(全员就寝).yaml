@@ -1,0 +1,246 @@
+blueprint:
+  name: 公区设备智能关闭(全员就寝)
+  description: |
+    通用逻辑：当检测到“所有在家的人”都“躺在床上”时，且公区无人，自动关闭设备。
+    该蓝图适用于家庭成员较多的场景，支持最多4人配置。
+    支持防抖动机制：当所有人在床后，等待一段时间（例如3分钟），如果期间有人下床，则取消关闭操作，避免误关。
+
+  domain: automation
+
+  input:
+    # =========================================
+    # 1. 全局设置
+    # =========================================
+    section_global:
+      name: 全局设置
+      icon: mdi:cog
+      input:
+        wait_time:
+          name: 确认延迟 (Wait Time)
+          description: 全员在床后，等待多久再执行关灯？(例如 3 分钟)。期间如果有人下床，将取消执行。
+          default: 
+            minutes: 3
+          selector:
+            duration: {}
+
+        public_area_sensors:
+          name: 公区安全检查 (必选)
+          description: |
+            只有当这些区域全部无人时，才会执行关闭。
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+                  device_class: [motion, occupancy, presence]
+
+    # =========================================
+    # 2. 人员配置
+    # =========================================
+    section_person_1:
+      name: 成员 1 配置
+      icon: mdi:account
+      collapsed: false
+      input:
+        p1_tracker:
+          name: 人员定位
+          default: ""
+          selector:
+            entity:
+              domain: [device_tracker, person]
+        p1_bed_sensors:
+          name: 床铺传感器
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+
+    section_person_2:
+      name: 成员 2 配置
+      icon: mdi:account
+      collapsed: false
+      input:
+        p2_tracker:
+          name: 人员定位
+          default: ""
+          selector:
+            entity:
+              domain: [device_tracker, person]
+        p2_bed_sensors:
+          name: 床铺传感器
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+
+    section_person_3:
+      name: 成员 3 配置
+      icon: mdi:account
+      collapsed: false
+      input:
+        p3_tracker:
+          name: 人员定位
+          default: ""
+          selector:
+            entity:
+              domain: [device_tracker, person]
+        p3_bed_sensors:
+          name: 床铺传感器
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+
+    section_person_4:
+      name: 成员 4 配置
+      icon: mdi:account
+      collapsed: true
+      input:
+        p4_tracker:
+          name: 人员定位
+          default: ""
+          selector:
+            entity:
+              domain: [device_tracker, person]
+        p4_bed_sensors:
+          name: 床铺传感器
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+
+    # =========================================
+    # 3. 执行动作
+    # =========================================
+    section_actions:
+      name: 执行动作
+      icon: mdi:flash
+      input:
+        target_lights:
+          name: 关闭灯光
+          default: []
+          selector:
+            target:
+              entity:
+                domain: light
+        target_medias:
+          name: 关闭媒体/电视
+          default: []
+          selector:
+            target:
+              entity:
+                domain: media_player
+        target_climates:
+          name: 关闭空调
+          default: []
+          selector:
+            target:
+              entity:
+                domain: climate
+
+# 核心触发逻辑
+trigger:
+  - platform: template
+    value_template: >
+      {% set config = [
+        {'tracker': inputs.p1_tracker, 'bed': inputs.p1_bed_sensors},
+        {'tracker': inputs.p2_tracker, 'bed': inputs.p2_bed_sensors},
+        {'tracker': inputs.p3_tracker, 'bed': inputs.p3_bed_sensors},
+        {'tracker': inputs.p4_tracker, 'bed': inputs.p4_bed_sensors}
+      ] %}
+      {% set ns = namespace(all_in_bed=true, someone_home=false) %}
+      {% for item in config %}
+        {% if item.tracker != none and item.tracker != "" %}
+          {% if is_state(item.tracker, 'home') %}
+            {% set ns.someone_home = true %}
+            {# 只要任意一个床铺传感器 ON 就算在床 #}
+            {% set active_bed = expand(item.bed) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+            {% if not active_bed %}
+              {% set ns.all_in_bed = false %}
+            {% endif %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+      {{ ns.someone_home and ns.all_in_bed }}
+    id: all_in_bed_true
+
+action:
+  # 1. 触发后，先等待设定的延迟时间 (例如3分钟)
+  - delay: !input wait_time
+
+  # 2. 等待结束后，再次检查“是否还在床上”
+  #    如果这3分钟内有人下床了，这里的 condition 会不满足，从而停止运行。
+  - condition: template
+    value_template: >
+      {% set config = [
+        {'tracker': inputs.p1_tracker, 'bed': inputs.p1_bed_sensors},
+        {'tracker': inputs.p2_tracker, 'bed': inputs.p2_bed_sensors},
+        {'tracker': inputs.p3_tracker, 'bed': inputs.p3_bed_sensors},
+        {'tracker': inputs.p4_tracker, 'bed': inputs.p4_bed_sensors}
+      ] %}
+      {% set ns = namespace(all_in_bed=true, someone_home=false) %}
+      {% for item in config %}
+        {% if item.tracker != none and item.tracker != "" %}
+          {% if is_state(item.tracker, 'home') %}
+            {% set ns.someone_home = true %}
+            {% set active_bed = expand(item.bed) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+            {% if not active_bed %}
+              {% set ns.all_in_bed = false %}
+            {% endif %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+      {{ ns.someone_home and ns.all_in_bed }}
+
+  # 3. 再次检查公区是否有人 (双重保险)
+  - condition: template
+    value_template: >
+      {% set sensors = inputs.public_area_sensors %}
+      {% if sensors in [none, [], ""] %}
+        true
+      {% else %}
+        {{ expand(sensors) | selectattr('state', 'eq', 'on') | list | count == 0 }}
+      {% endif %}
+
+  # 4. 执行关闭
+  - choose:
+      - conditions: "{{ inputs.target_lights != [] }}"
+        sequence:
+          - service: light.turn_off
+            target: !input target_lights
+  - choose:
+      - conditions: "{{ inputs.target_medias != [] }}"
+        sequence:
+          - service: media_player.turn_off
+            target: !input target_medias
+  - choose:
+      - conditions: "{{ inputs.target_climates != [] }}"
+        sequence:
+          - service: climate.turn_off
+            target: !input target_climates
+
+trigger_variables:
+  inputs:
+    public_area_sensors: !input public_area_sensors
+    target_lights: !input target_lights
+    target_medias: !input target_medias
+    target_climates: !input target_climates
+    p1_tracker: !input p1_tracker
+    p1_bed_sensors: !input p1_bed_sensors
+    p2_tracker: !input p2_tracker
+    p2_bed_sensors: !input p2_bed_sensors
+    p3_tracker: !input p3_tracker
+    p3_bed_sensors: !input p3_bed_sensors
+    p4_tracker: !input p4_tracker
+    p4_bed_sensors: !input p4_bed_sensors
+
+mode: restart

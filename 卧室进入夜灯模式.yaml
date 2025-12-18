@@ -1,0 +1,140 @@
+blueprint:
+  name: 卧室进入夜灯模式
+  description: |
+      当卧室有人且处于睡眠模式时，若检测到从门外进入（门口红外最近触发过），则开启夜灯模式。
+      
+      **所需设备与状态 (Requirements):**
+      *   **卧室门磁**: 安装于卧室门，用于触发自动化。
+      *   **人体存在传感器**: 安装于卧室内，用于确认屋内有人。
+      *   **门口/走廊红外传感器**: 安装于卧室门外，用于判定“从外向里”的进入动作（区分外出与进入）。
+      *   **睡眠模式开关**: 虚拟开关 (`input_boolean`)，支持多选（如左侧/右侧），任意一个为 ON 即生效。
+      
+      **逻辑流程:**
+      1.  **触发**: 卧室门被打开。
+      2.  **判定**:
+          *   卧室内 **有人**。
+          *   睡眠模式 **已开启**。
+          *   门外红外在最近 **X秒** 内曾被触发 (证明是刚走过来)。
+      3.  **执行**: 开启指定灯光，并应用夜灯亮度和色温。
+      
+  domain: automation
+  input:
+    door_sensor:
+      name: 卧室门磁传感器
+      description: 检测门开关状态的传感器
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: door
+    
+    presence_sensor:
+      name: 卧室人体存在传感器
+      description: 必须检测到有人才触发
+      selector:
+        entity:
+          domain: binary_sensor
+          
+    entrance_motion_sensor:
+      name: 门口/走廊红外传感器
+      description: 用于判断是否是从外向内走的动作
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+
+    sleep_mode_entities:
+      name: 睡眠模式开关
+      description: 选择睡眠模式的实体（例如 input_boolean）。如果选择了多个（如左侧和右侧），只要任意一个为 ON，条件就成立。
+      selector:
+        entity:
+          multiple: true
+          
+    target_lights:
+      name: 目标灯光
+      description: 需要开启夜灯模式的灯具
+      selector:
+        target:
+          entity:
+            domain: light
+            
+    entry_timeout:
+      name: 进入判定时间窗口
+      description: 门口红外触发后，多少秒内开门才算作有效进入？(默认 15秒)
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: seconds
+          mode: slider
+
+    light_brightness:
+      name: 夜灯亮度
+      description: 灯光开启的亮度百分比 (默认 2%)
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 100
+          unit_of_measurement: "%"
+          mode: slider
+
+    light_kelvin:
+      name: 灯光色温
+      description: 灯光开启的色温 Kelvin 值 (默认 3000K)
+      default: 3000
+      selector:
+        number:
+          min: 2700
+          max: 6500
+          unit_of_measurement: "K"
+          mode: box
+
+    light_transition:
+      name: 渐变时间
+      description: 灯光亮起的过渡时间 (默认 1秒)
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 10
+          unit_of_measurement: seconds
+          mode: slider
+
+# 定义变量以便在模板中使用
+variables:
+  entrance_motion: !input entrance_motion_sensor
+  timeout_seconds: !input entry_timeout
+
+trigger:
+  - platform: state
+    entity_id: !input door_sensor
+    from: "off"
+    to: "on"
+
+condition:
+  - condition: and
+    conditions:
+      # 1. 存在传感器检测到人
+      - condition: state
+        entity_id: !input presence_sensor
+        state: "on"
+      
+      # 2. 睡眠模式检测 (列表匹配任意一个为 on)
+      - condition: state
+        entity_id: !input sleep_mode_entities
+        state: "on"
+        match: any
+      
+      # 3. 模板判定：门口红外最后更新时间 < 设定秒数
+      - condition: template
+        value_template: >-
+          {{ (as_timestamp(now()) - as_timestamp(states[entrance_motion].last_changed)) < timeout_seconds }}
+
+action:
+  - service: light.turn_on
+    target: !input target_lights
+    data:
+      brightness_pct: !input light_brightness
+      kelvin: !input light_kelvin
+      transition: !input light_transition

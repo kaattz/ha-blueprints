@@ -1,0 +1,402 @@
+blueprint:
+  name: 卧室套房智能控制
+  description: |
+    # 卧室套房智能控制
+
+    **核心功能：**
+    * 💡 **进门开灯**：支持自定义亮度与色温。
+    * 🌙 **夜灯模式**：睡眠期间他人进入，只开微弱夜灯。
+    * ⏳ **自动关断**：人走后分级延时关灯、关空调。
+    * 🛡️ **误触保护**：结合床压力、卫浴传感器，防止误关灯。
+
+  domain: automation
+  input:
+    # ==========================
+    # 分组 1: 核心传感器与模式
+    # ==========================
+    section_sensors:
+      name: 核心传感器与模式
+      description: 设置人体感应、床压力以及睡眠模式
+      icon: mdi:account-eye
+      input:
+        inp_bed_presence:
+          name: 主卧室人体传感器 (必选)
+          selector:
+            entity:
+              domain: binary_sensor
+              device_class:
+                - motion
+                - occupancy
+                - presence
+
+        inp_beds:
+          name: 床铺压力/存在传感器 (可选)
+          description: 只要其中一个为ON，就不会关灯
+          default: []
+          selector:
+            entity:
+              multiple: true
+              domain: binary_sensor
+
+        inp_suite_presence:
+          name: 套房其他传感器 (可选)
+          description: 如卫生间、衣帽间，只要为ON，就不会关灯
+          default: []
+          selector:
+            entity:
+              multiple: true
+              domain: binary_sensor
+
+        inp_sleep_modes:
+          name: 睡眠模式 (可选)
+          description: 任意一个为ON时，视为睡眠中
+          default: []
+          selector:
+            entity:
+              multiple: true
+              domain: input_boolean
+
+    # ==========================
+    # 分组 2: 进房灯光设置
+    # ==========================
+    section_entry:
+      name: 进房灯光设置
+      description: 正常状态下进门的开灯设置
+      icon: mdi:lightbulb-auto
+      input:
+        inp_entry_lights:
+          name: 进房开启的灯光
+          selector:
+            target:
+              entity:
+                domain: light
+
+        inp_entry_brightness:
+          name: 开启亮度 (%)
+          default: 50
+          selector:
+            number:
+              min: 1
+              max: 100
+              mode: slider
+
+        inp_entry_kelvin:
+          name: 开启色温 (K)
+          default: 3000
+          selector:
+            number:
+              min: 2000
+              max: 6500
+              step: 100
+              mode: slider
+
+        inp_any_light_on:
+          name: 已有灯亮检测 (可选)
+          description: 若此实体为ON，进门不执行动作
+          default: []
+          selector:
+            entity:
+              multiple: true
+              domain: binary_sensor
+
+        inp_lux:
+          name: 光照传感器 (可选)
+          default: []
+          selector:
+            entity:
+              domain: sensor
+              device_class: illuminance
+              multiple: true
+
+        inp_lux_threshold:
+          name: 光照阈值 (lx)
+          default: 20
+          selector:
+            number:
+              min: 0
+              max: 1000
+              mode: box
+
+        inp_enable_sunset:
+          name: 日落后强制开灯
+          default: false
+          selector:
+            boolean: {}
+
+    # ==========================
+    # 分组 3: 夜灯逻辑
+    # ==========================
+    section_night:
+      name: 夜灯模式 (门磁触发)
+      description: 仅在睡眠模式下有效，需配合门磁
+      icon: mdi:weather-night
+      input:
+        inp_door:
+          name: 卧室门磁 (可选)
+          default: []
+          selector:
+            entity:
+              domain: binary_sensor
+              device_class: door
+              multiple: true
+
+        inp_entrance_motion:
+          name: 门外人体传感器 (可选)
+          default: []
+          selector:
+            entity:
+              domain: binary_sensor
+              multiple: true
+
+        inp_entry_timeout:
+          name: 进门判定时间 (秒)
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 60
+              mode: slider
+
+        inp_night_lights:
+          name: 夜灯目标
+          default: {}
+          selector:
+            target:
+              entity:
+                domain: light
+
+        inp_night_brightness:
+          name: 夜灯亮度 (%)
+          default: 2
+          selector:
+            number:
+              min: 1
+              max: 100
+              mode: slider
+
+        inp_night_kelvin:
+          name: 夜灯色温 (K)
+          default: 3000
+          selector:
+            number:
+              min: 2000
+              max: 6500
+              mode: slider
+
+    # ==========================
+    # 分组 4: 离房关断逻辑
+    # ==========================
+    section_off:
+      name: 离房关断逻辑
+      description: 无人时的关闭设置
+      icon: mdi:power-off
+      input:
+        inp_off_lights:
+          name: 无人时关闭的灯光
+          selector:
+            target:
+              entity:
+                domain: light
+
+        inp_shutdown_devices:
+          name: 无人时关闭的其他设备
+          default: {}
+          selector:
+            target:
+              entity:
+                domain:
+                  - media_player
+                  - switch
+                  - fan
+
+        inp_light_off_delay:
+          name: 关灯延时
+          default:
+            minutes: 20
+          selector:
+            duration: {}
+
+        inp_ac:
+          name: 空调设备 (可选)
+          default: []
+          selector:
+            entity:
+              domain: climate
+              multiple: true
+
+        inp_ac_delay:
+          name: 关空调延时
+          default:
+            minutes: 60
+          selector:
+            duration: {}
+
+# ========================================================
+# 触发器
+# ========================================================
+trigger:
+  # 人进卧室
+  - platform: state
+    entity_id: !input inp_bed_presence
+    from: "off"
+    to: "on"
+    id: t_enter
+
+  # 门被打开
+  - platform: state
+    entity_id: !input inp_door
+    from: "off"
+    to: "on"
+    id: t_door
+
+  # 人走超时 (灯)
+  - platform: state
+    entity_id: !input inp_bed_presence
+    from: "on"
+    to: "off"
+    for: !input inp_light_off_delay
+    id: t_lightoff
+
+  # 人走超时 (空调)
+  - platform: state
+    entity_id: !input inp_bed_presence
+    from: "on"
+    to: "off"
+    for: !input inp_ac_delay
+    id: t_ac
+
+# ========================================================
+# 动作
+# ========================================================
+action:
+  # 1. 定义变量
+  - variables:
+      # 实体输入映射
+      v_bed_sensor: !input inp_bed_presence
+      v_beds: !input inp_beds
+      v_suite: !input inp_suite_presence
+      v_sleep_modes: !input inp_sleep_modes
+      v_any_light: !input inp_any_light_on
+      v_lux_list: !input inp_lux
+      v_door_list: !input inp_door
+      v_motion_outside_list: !input inp_entrance_motion
+      v_ac_list: !input inp_ac
+
+      # 数值/开关输入映射
+      v_lux_limit: !input inp_lux_threshold
+      v_sunset_enable: !input inp_enable_sunset
+      v_timeout: !input inp_entry_timeout
+
+      # 逻辑计算：是否有人
+      is_occupied: >
+        {% set main = is_state(v_bed_sensor, 'on') %}
+        {% set bed_pressure = expand(v_beds) | selectattr('state','eq','on') | list | count > 0 %}
+        {% set suite_area = expand(v_suite) | selectattr('state','eq','on') | list | count > 0 %}
+        {{ main or bed_pressure or suite_area }}
+
+      # 逻辑计算：是否睡眠中
+      is_sleeping: >
+        {{ expand(v_sleep_modes) | selectattr('state','eq','on') | list | count > 0 }}
+
+      # 逻辑计算：灯是否已经亮着
+      lights_on: >
+        {{ expand(v_any_light) | selectattr('state','eq','on') | list | count > 0 }}
+
+      # 逻辑计算：判断门外刚才是否有人
+      valid_entry_motion: >
+        {% set motion_list = expand(v_motion_outside_list) %}
+        {% if motion_list | count == 0 %}
+          false
+        {% else %}
+          {% set recent = namespace(found=false) %}
+          {% for entity in motion_list %}
+            {% if (as_timestamp(now()) - as_timestamp(entity.last_changed)) < v_timeout %}
+               {% set recent.found = true %}
+            {% endif %}
+          {% endfor %}
+          {{ recent.found }}
+        {% endif %}
+
+  - choose:
+      # --------------------------------------------------
+      # 场景 1: 正常进房开灯
+      # --------------------------------------------------
+      - conditions:
+          - condition: trigger
+            id: t_enter
+          - condition: template
+            value_template: "{{ not is_sleeping }}"
+          - condition: template
+            value_template: "{{ not lights_on }}"
+          # 光照条件
+          - condition: or
+            conditions:
+              - condition: template
+                value_template: >
+                  {% set lux_s = expand(v_lux_list) | first %}
+                  {% if lux_s %}
+                    {{ lux_s.state | float(0) < v_lux_limit }}
+                  {% else %}
+                    true 
+                  {% endif %}
+              - condition: and
+                conditions:
+                  - condition: template
+                    value_template: "{{ v_sunset_enable }}"
+                  - condition: sun
+                    after: sunset
+        sequence:
+          - action: light.turn_on
+            target: !input inp_entry_lights
+            data:
+              brightness_pct: !input inp_entry_brightness
+              color_temp_kelvin: !input inp_entry_kelvin
+
+      # --------------------------------------------------
+      # 场景 2: 睡眠中夜灯模式
+      # --------------------------------------------------
+      - conditions:
+          - condition: trigger
+            id: t_door
+          - condition: template
+            value_template: "{{ is_sleeping }}"
+          - condition: template
+            value_template: "{{ is_occupied }}"
+          - condition: template
+            value_template: "{{ valid_entry_motion }}"
+        sequence:
+          - action: light.turn_on
+            target: !input inp_night_lights
+            data:
+              brightness_pct: !input inp_night_brightness
+              color_temp_kelvin: !input inp_night_kelvin
+
+      # --------------------------------------------------
+      # 场景 3: 延时关灯和设备
+      # --------------------------------------------------
+      - conditions:
+          - condition: trigger
+            id: t_lightoff
+          - condition: template
+            value_template: "{{ not is_occupied }}"
+        sequence:
+          - action: light.turn_off
+            target: !input inp_off_lights
+          - action: homeassistant.turn_off
+            target: !input inp_shutdown_devices
+
+      # --------------------------------------------------
+      # 场景 4: 延时关空调
+      # --------------------------------------------------
+      - conditions:
+          - condition: trigger
+            id: t_ac
+          - condition: template
+            value_template: "{{ not is_occupied }}"
+        sequence:
+          - action: climate.turn_off
+            target:
+              entity_id: !input inp_ac
+
+mode: restart
+max_exceeded: silent

@@ -1,0 +1,457 @@
+blueprint:
+  name: 智能起夜模式
+  description: |
+    **功能特点：**
+    1. **严格时间控制**：不仅入睡受时间限制，起夜开灯动作也严格限制在设定时段内。
+    2. **精准入睡判定**：必须同时满足【人在床上 + 卧室关灯】才进入睡眠模式。
+    3. **三段式动线**：床头 -> 通道(客厅) -> 目的地(厨/卫)。
+    4. **智能防抖**：内置回床冷却逻辑，防止误触。
+    5. **手动唤醒打断**：手动开启卧室灯，自动退出睡眠模式（用于半夜看书/刷手机）。
+
+    ---
+    ⚠️ **配置前必读：**
+
+    1. **创建辅助实体**：
+       请在【设置 -> 辅助元素】中创建两个 **开关 (Input Boolean)**：
+       - **睡眠模式开关** (例如: `input_boolean.sleep_mode`)
+       - **起床模式开关** (例如: `input_boolean.get_up_mode`)
+
+    2. **防冲突提醒 (重要)**：
+       若厨/卫/客厅已有日常感应自动化，请务必在其 **条件 (Condition)** 中添加：**【起床模式开关】状态为 `关 (Off)`**。
+
+  domain: automation
+  input:
+    # ===========================
+    # 1. 核心传感器
+    # ===========================
+    pressure_sensor:
+      name: 床铺压力传感器
+      description: "Binary Sensor: on=在床上, off=离床"
+      selector:
+        entity:
+          domain: binary_sensor
+
+    bedroom_status_light:
+      name: "卧室灯光状态检测 (核心)"
+      description: "⚠️ 必须包含卧室所有灯的组(Group)或传感器。"
+      selector:
+        entity:
+          domain:
+            - light
+            - binary_sensor
+            - group
+
+    motion_sensor_bedside:
+      name: "床边/地脚传感器"
+      description: "用于检测下床动作。支持 Binary 或 Event。"
+      selector:
+        entity:
+          domain:
+            - binary_sensor
+            - event
+
+    motion_event_keyword:
+      name: "Event 触发关键词"
+      description: "仅 Event 实体需要填写，如 '有人移动'。Binary Sensor 忽略此项。"
+      default: "有人移动"
+      selector:
+        text: {}
+
+    # ===========================
+    # 2. 辅助实体
+    # ===========================
+    helper_sleep_mode:
+      name: "辅助开关：睡眠模式"
+      description: "⚠️ 选预先创建好的 Input Boolean。"
+      selector:
+        entity:
+          domain: input_boolean
+
+    helper_get_up_mode:
+      name: "辅助开关：起床模式"
+      description: "⚠️ 选预先创建好的 Input Boolean。"
+      selector:
+        entity:
+          domain: input_boolean
+
+    # ===========================
+    # 3. [起夜] 床头灯设置
+    # ===========================
+    bedside_lights:
+      name: "[床头] 灯光实体"
+      description: "起夜时首先点亮的灯光"
+      selector:
+        target:
+          entity:
+            domain: light
+    bedside_brightness:
+      name: "[床头] 亮度 (%)"
+      default: 2
+      selector:
+        number: { min: 1, max: 100, unit_of_measurement: "%" }
+    bedside_kelvin:
+      name: "[床头] 色温 (K)"
+      default: 3000
+      selector:
+        number: { min: 2000, max: 6500, unit_of_measurement: "K" }
+
+    # ===========================
+    # 4. 其他路径设置
+    # ===========================
+    path_passage_sensor:
+      name: "[通道/客厅] 触发传感器"
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+    path_passage_lights:
+      name: "[通道/客厅] 灯光实体"
+      default: []
+      selector:
+        target:
+          entity:
+            domain: light
+    path_passage_brightness:
+      name: "[通道/客厅] 亮度 (%)"
+      default: 3
+      selector:
+        number: { min: 1, max: 100, unit_of_measurement: "%" }
+    path_passage_kelvin:
+      name: "[通道/客厅] 色温 (K)"
+      default: 3000
+      selector:
+        number: { min: 2000, max: 6500, unit_of_measurement: "K" }
+
+    path_a_sensor:
+      name: "[终点 A] 触发传感器"
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+    path_a_lights:
+      name: "[终点 A] 灯光实体"
+      default: []
+      selector:
+        target:
+          entity:
+            domain: light
+    path_a_brightness:
+      name: "[终点 A] 亮度 (%)"
+      default: 3
+      selector:
+        number: { min: 1, max: 100, unit_of_measurement: "%" }
+    path_a_kelvin:
+      name: "[终点 A] 色温 (K)"
+      default: 3000
+      selector:
+        number: { min: 2000, max: 6500, unit_of_measurement: "K" }
+
+    path_b_sensor:
+      name: "[终点 B] 触发传感器"
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+    path_b_lights:
+      name: "[终点 B] 灯光实体"
+      default: []
+      selector:
+        target:
+          entity:
+            domain: light
+    path_b_brightness:
+      name: "[终点 B] 亮度 (%)"
+      default: 3
+      selector:
+        number: { min: 1, max: 100, unit_of_measurement: "%" }
+    path_b_kelvin:
+      name: "[终点 B] 色温 (K)"
+      default: 3000
+      selector:
+        number: { min: 2000, max: 6500, unit_of_measurement: "K" }
+
+    # ===========================
+    # 5. 回床设置
+    # ===========================
+    lights_to_turn_off:
+      name: "[回床] 统一关闭的灯组"
+      description: "建议包含所有路径灯光，回床时强制全关。"
+      selector:
+        target:
+          entity:
+            domain: light
+
+    sleep_start_time:
+      name: 自动入睡/起夜开始时间
+      default: "21:00:00"
+      selector:
+        time: {}
+    sleep_end_time:
+      name: 自动入睡/起夜结束时间
+      default: "07:00:00"
+      selector:
+        time: {}
+    cooldown_seconds:
+      name: "回床冷却时间 (秒)"
+      description: "回床后防止误触床边/地脚传感器的冷却时间。"
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 600
+          unit_of_measurement: seconds
+
+mode: queued
+max: 10
+
+variables:
+  motion_keyword: !input motion_event_keyword
+  sleep_mode_entity: !input helper_sleep_mode
+  cooldown_sec: !input cooldown_seconds
+
+trigger:
+  # 1. 压力传感器：有人
+  - platform: state
+    entity_id: !input pressure_sensor
+    from: "off"
+    to: "on"
+    id: "pressure_on"
+
+  # 2. 卧室灯光组：关闭 (准备睡觉/恢复睡眠)
+  - platform: state
+    entity_id: !input bedroom_status_light
+    from: "on"
+    to: "off"
+    id: "lights_group_off"
+
+  # 3. 卧室灯光组：开启 (手动唤醒检测) [关键]
+  - platform: state
+    entity_id: !input bedroom_status_light
+    from: "off"
+    to: "on"
+    id: "lights_group_on"
+
+  # 4. 压力传感器：无人
+  - platform: state
+    entity_id: !input pressure_sensor
+    from: "on"
+    to: "off"
+    id: "pressure_off"
+
+  # 5. 床边/地脚红外
+  - platform: state
+    entity_id: !input motion_sensor_bedside
+    id: "motion_bedside"
+
+  # 6. 各路径传感器
+  - platform: state
+    entity_id: !input path_passage_sensor
+    from: "off"
+    to: "on"
+    id: "motion_passage"
+  - platform: state
+    entity_id: !input path_a_sensor
+    from: "off"
+    to: "on"
+    id: "motion_path_a"
+  - platform: state
+    entity_id: !input path_b_sensor
+    from: "off"
+    to: "on"
+    id: "motion_path_b"
+
+action:
+  - choose:
+      # ===================================================
+      # 场景 1: 首次入睡 / 关灯恢复睡眠
+      # ===================================================
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "pressure_on"
+              - condition: trigger
+                id: "lights_group_off" # 灯组全关
+          # 🔴 时间限制
+          - condition: time
+            after: !input sleep_start_time
+            before: !input sleep_end_time
+          - condition: state
+            entity_id: !input helper_get_up_mode
+            state: "off"
+          - condition: state
+            entity_id: !input helper_sleep_mode
+            state: "off"
+          # 必须人在床上
+          - condition: state
+            entity_id: !input pressure_sensor
+            state: "on"
+          # 必须卧室所有灯都关了
+          - condition: state
+            entity_id: !input bedroom_status_light
+            state: "off"
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input helper_sleep_mode
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input helper_get_up_mode
+
+      # ===================================================
+      # 场景 2: 回床 (起夜结束)
+      # ===================================================
+      - conditions:
+          - condition: trigger
+            id: "pressure_on"
+          - condition: state
+            entity_id: !input helper_get_up_mode
+            state: "on"
+        sequence:
+          - service: light.turn_off
+            target: !input lights_to_turn_off
+          - service: light.turn_off
+            target: !input bedside_lights
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input helper_get_up_mode
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input helper_sleep_mode
+
+      # ===================================================
+      # 场景 3: 起夜下床 (床边触发)
+      # ===================================================
+      - conditions:
+          - condition: trigger
+            id: "motion_bedside"
+          # 🔴 时间限制
+          - condition: time
+            after: !input sleep_start_time
+            before: !input sleep_end_time
+          - condition: state
+            entity_id: !input helper_sleep_mode
+            state: "on"
+          # 冷却判断
+          - condition: template
+            value_template: >
+              {% set trigger_entity = trigger.entity_id %}
+              {% set domain = trigger_entity.split('.')[0] %}
+              {% if domain == 'binary_sensor' %}
+                {{ trigger.to_state.state == 'on' }}
+              {% elif domain == 'event' %}
+                {{ trigger.to_state.attributes.event_type is defined 
+                   and trigger.to_state.attributes.event_type == motion_keyword }}
+              {% else %}
+                false
+              {% endif %}
+          - condition: template
+            value_template: >
+              {% if states[sleep_mode_entity] is defined and states[sleep_mode_entity].last_changed %}
+                {{ (as_timestamp(now()) - as_timestamp(states[sleep_mode_entity].last_changed)) > (cooldown_sec | int) }}
+              {% else %}
+                true
+              {% endif %}
+          # 必须当前不在起夜模式中 (防止重复触发)
+          - condition: state
+            entity_id: !input helper_get_up_mode
+            state: "off"
+        sequence:
+          # 先开起夜模式标记，再开灯
+          # 这样做是为了防止 "卧室灯组变亮" 的触发器误判为人为操作
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input helper_get_up_mode
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input helper_sleep_mode
+          - service: light.turn_on
+            target: !input bedside_lights
+            data:
+              brightness_pct: !input bedside_brightness
+              color_temp_kelvin: !input bedside_kelvin
+
+      # ===================================================
+      # 场景 4: 离开床铺
+      # ===================================================
+      - conditions:
+          - condition: trigger
+            id: "pressure_off"
+          - condition: state
+            entity_id: !input helper_get_up_mode
+            state: "on"
+        sequence: []
+
+      # ===================================================
+      # 场景 5~7: 路径感应 (省略重复解释)
+      # ===================================================
+      - conditions:
+          - condition: trigger
+            id: "motion_passage"
+          - condition: time
+            after: !input sleep_start_time
+            before: !input sleep_end_time
+          - condition: state
+            entity_id: !input helper_get_up_mode
+            state: "on"
+        sequence:
+          - service: light.turn_on
+            target: !input path_passage_lights
+            data:
+              brightness_pct: !input path_passage_brightness
+              color_temp_kelvin: !input path_passage_kelvin
+
+      - conditions:
+          - condition: trigger
+            id: "motion_path_a"
+          - condition: time
+            after: !input sleep_start_time
+            before: !input sleep_end_time
+          - condition: state
+            entity_id: !input helper_get_up_mode
+            state: "on"
+        sequence:
+          - service: light.turn_on
+            target: !input path_a_lights
+            data:
+              brightness_pct: !input path_a_brightness
+              color_temp_kelvin: !input path_a_kelvin
+
+      - conditions:
+          - condition: trigger
+            id: "motion_path_b"
+          - condition: time
+            after: !input sleep_start_time
+            before: !input sleep_end_time
+          - condition: state
+            entity_id: !input helper_get_up_mode
+            state: "on"
+        sequence:
+          - service: light.turn_on
+            target: !input path_b_lights
+            data:
+              brightness_pct: !input path_b_brightness
+              color_temp_kelvin: !input path_b_kelvin
+
+      # ===================================================
+      # 场景 8: 手动唤醒检测 (灯组变亮)
+      # ===================================================
+      - conditions:
+          - condition: trigger
+            id: "lights_group_on"
+          # 关键条件：只有当系统判定 "现在不是我在帮你起夜" 时，才认为是手动
+          - condition: state
+            entity_id: !input helper_get_up_mode
+            state: "off"
+          # 且之前处于睡眠状态
+          - condition: state
+            entity_id: !input helper_sleep_mode
+            state: "on"
+        sequence:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input helper_sleep_mode
+          # 不需要操作 get_up_mode，因为它已经是 off
