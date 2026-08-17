@@ -2,7 +2,7 @@ blueprint:
   name: 智能起夜模式
   description: |
     **功能特点：**
-    1. **严格时间控制**：不仅入睡受时间限制，起夜开灯动作也严格限制在设定时段内。
+    1. **严格时间控制**：仅在可配置时间范围（默认 21:00-07:00）内启动新起夜，已启动流程可在结束后 30 分钟内收尾。
     2. **精准入睡判定**：必须同时满足【人在床上 + 卧室关灯】才进入睡眠模式。
     3. **三段式动线**：床头 -> 通道(客厅) -> 目的地(厨/卫)。
     4. **智能防抖**：内置回床冷却逻辑，防止误触。
@@ -94,6 +94,20 @@ blueprint:
       default: 3000
       selector:
         number: { min: 2000, max: 6500, unit_of_measurement: "K" }
+    bedroom_illuminance_sensor:
+      name: "[床头] 照度传感器"
+      description: "可选。未配置或状态不可用时使用太阳状态兜底。"
+      default: []
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+          multiple: true
+    bedroom_illuminance_threshold:
+      name: "[床头] 夜灯照度阈值"
+      default: 15
+      selector:
+        number: { min: 0, max: 500, step: 1, unit_of_measurement: "lx", mode: box }
 
     # ===========================
     # 4. 其他路径设置
@@ -122,6 +136,20 @@ blueprint:
       default: 3000
       selector:
         number: { min: 2000, max: 6500, unit_of_measurement: "K" }
+    path_passage_illuminance_sensor:
+      name: "[通道/客厅] 照度传感器"
+      description: "可选。未配置或状态不可用时使用太阳状态兜底。"
+      default: []
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+          multiple: true
+    path_passage_illuminance_threshold:
+      name: "[通道/客厅] 夜灯照度阈值"
+      default: 15
+      selector:
+        number: { min: 0, max: 500, step: 1, unit_of_measurement: "lx", mode: box }
 
     path_a_sensor:
       name: "[终点 A] 触发传感器"
@@ -147,6 +175,20 @@ blueprint:
       default: 3000
       selector:
         number: { min: 2000, max: 6500, unit_of_measurement: "K" }
+    path_a_illuminance_sensor:
+      name: "[终点 A] 照度传感器"
+      description: "可选。未配置或状态不可用时使用太阳状态兜底。"
+      default: []
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+          multiple: true
+    path_a_illuminance_threshold:
+      name: "[终点 A] 夜灯照度阈值"
+      default: 15
+      selector:
+        number: { min: 0, max: 500, step: 1, unit_of_measurement: "lx", mode: box }
 
     path_b_sensor:
       name: "[终点 B] 触发传感器"
@@ -172,6 +214,20 @@ blueprint:
       default: 3000
       selector:
         number: { min: 2000, max: 6500, unit_of_measurement: "K" }
+    path_b_illuminance_sensor:
+      name: "[终点 B] 照度传感器"
+      description: "可选。未配置或状态不可用时使用太阳状态兜底。"
+      default: []
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+          multiple: true
+    path_b_illuminance_threshold:
+      name: "[终点 B] 夜灯照度阈值"
+      default: 15
+      selector:
+        number: { min: 0, max: 500, step: 1, unit_of_measurement: "lx", mode: box }
 
     # ===========================
     # 5. 回床设置
@@ -186,11 +242,13 @@ blueprint:
 
     sleep_start_time:
       name: 自动入睡/起夜开始时间
+      description: "可调整，默认 21:00。开始时间与结束时间之间必须留出超过 30 分钟的非起夜区间。"
       default: "21:00:00"
       selector:
         time: {}
     sleep_end_time:
       name: 自动入睡/起夜结束时间
+      description: "可调整，默认 07:00。强制清理在结束后 30 分钟执行；非整分时间最多延后 59 秒，不会提前。"
       default: "07:00:00"
       selector:
         time: {}
@@ -211,8 +269,136 @@ variables:
   motion_keyword: !input motion_event_keyword
   sleep_mode_entity: !input helper_sleep_mode
   cooldown_sec: !input cooldown_seconds
+  sleep_start_text: !input sleep_start_time
+  sleep_end_text: !input sleep_end_time
+  bedroom_lux_entities: !input bedroom_illuminance_sensor
+  bedroom_lux_threshold: !input bedroom_illuminance_threshold
+  passage_lux_entities: !input path_passage_illuminance_sensor
+  passage_lux_threshold: !input path_passage_illuminance_threshold
+  path_a_lux_entities: !input path_a_illuminance_sensor
+  path_a_lux_threshold: !input path_a_illuminance_threshold
+  path_b_lux_entities: !input path_b_illuminance_sensor
+  path_b_lux_threshold: !input path_b_illuminance_threshold
+  passage_lights_target: !input path_passage_lights
+  path_a_lights_target: !input path_a_lights
+  path_b_lights_target: !input path_b_lights
+  is_schedule_valid: >-
+    {% set start_parts = sleep_start_text.split(':') %}
+    {% set end_parts = sleep_end_text.split(':') %}
+    {% set start_second = (start_parts[0] | int) * 3600 + (start_parts[1] | int) * 60 + (start_parts[2] | int) %}
+    {% set end_second = (end_parts[0] | int) * 3600 + (end_parts[1] | int) * 60 + (end_parts[2] | int) %}
+    {{ ((start_second - end_second) % 86400) > 1800 }}
+  is_main_window: >-
+    {% set start_parts = sleep_start_text.split(':') %}
+    {% set end_parts = sleep_end_text.split(':') %}
+    {% set start_second = (start_parts[0] | int) * 3600 + (start_parts[1] | int) * 60 + (start_parts[2] | int) %}
+    {% set end_second = (end_parts[0] | int) * 3600 + (end_parts[1] | int) * 60 + (end_parts[2] | int) %}
+    {% set current_second = now().hour * 3600 + now().minute * 60 + now().second %}
+    {% set schedule_valid = ((start_second - end_second) % 86400) > 1800 %}
+    {% if not schedule_valid %}
+      false
+    {% elif start_second < end_second %}
+      {{ start_second <= current_second < end_second }}
+    {% elif start_second > end_second %}
+      {{ current_second >= start_second or current_second < end_second }}
+    {% else %}
+      false
+    {% endif %}
+  is_grace_window: >-
+    {% set end_parts = sleep_end_text.split(':') %}
+    {% set end_second = (end_parts[0] | int) * 3600 + (end_parts[1] | int) * 60 + (end_parts[2] | int) %}
+    {% set cleanup_second = (end_second + 1800) % 86400 %}
+    {% set current_second = now().hour * 3600 + now().minute * 60 + now().second %}
+    {% if end_second < cleanup_second %}
+      {{ end_second <= current_second < cleanup_second }}
+    {% else %}
+      {{ current_second >= end_second or current_second < cleanup_second }}
+    {% endif %}
+  is_bedroom_dark: >-
+    {% set readings = namespace(values=[]) %}
+    {% for lux_sensor in expand(bedroom_lux_entities) %}
+      {% if is_number(lux_sensor.state) %}
+        {% set readings.values = readings.values + [lux_sensor.state | float] %}
+      {% endif %}
+    {% endfor %}
+    {% if readings.values | count > 0 %}
+      {{ (readings.values | max) < (bedroom_lux_threshold | float) }}
+    {% else %}
+      {{ is_state('sun.sun', 'below_horizon') }}
+    {% endif %}
+  bedroom_dark_source: >-
+    {% set readings = namespace(count=0) %}
+    {% for lux_sensor in expand(bedroom_lux_entities) %}
+      {% if is_number(lux_sensor.state) %}{% set readings.count = readings.count + 1 %}{% endif %}
+    {% endfor %}
+    {{ 'lux' if readings.count > 0 else 'sun_fallback' if is_state('sun.sun', 'below_horizon') else 'denied' }}
+  is_passage_dark: >-
+    {% set readings = namespace(values=[]) %}
+    {% for lux_sensor in expand(passage_lux_entities) %}
+      {% if is_number(lux_sensor.state) %}
+        {% set readings.values = readings.values + [lux_sensor.state | float] %}
+      {% endif %}
+    {% endfor %}
+    {% if readings.values | count > 0 %}
+      {{ (readings.values | max) < (passage_lux_threshold | float) }}
+    {% else %}
+      {{ is_state('sun.sun', 'below_horizon') }}
+    {% endif %}
+  passage_dark_source: >-
+    {% set readings = namespace(count=0) %}
+    {% for lux_sensor in expand(passage_lux_entities) %}
+      {% if is_number(lux_sensor.state) %}{% set readings.count = readings.count + 1 %}{% endif %}
+    {% endfor %}
+    {{ 'lux' if readings.count > 0 else 'sun_fallback' if is_state('sun.sun', 'below_horizon') else 'denied' }}
+  is_path_a_dark: >-
+    {% set readings = namespace(values=[]) %}
+    {% for lux_sensor in expand(path_a_lux_entities) %}
+      {% if is_number(lux_sensor.state) %}
+        {% set readings.values = readings.values + [lux_sensor.state | float] %}
+      {% endif %}
+    {% endfor %}
+    {% if readings.values | count > 0 %}
+      {{ (readings.values | max) < (path_a_lux_threshold | float) }}
+    {% else %}
+      {{ is_state('sun.sun', 'below_horizon') }}
+    {% endif %}
+  path_a_dark_source: >-
+    {% set readings = namespace(count=0) %}
+    {% for lux_sensor in expand(path_a_lux_entities) %}
+      {% if is_number(lux_sensor.state) %}{% set readings.count = readings.count + 1 %}{% endif %}
+    {% endfor %}
+    {{ 'lux' if readings.count > 0 else 'sun_fallback' if is_state('sun.sun', 'below_horizon') else 'denied' }}
+  is_path_b_dark: >-
+    {% set readings = namespace(values=[]) %}
+    {% for lux_sensor in expand(path_b_lux_entities) %}
+      {% if is_number(lux_sensor.state) %}
+        {% set readings.values = readings.values + [lux_sensor.state | float] %}
+      {% endif %}
+    {% endfor %}
+    {% if readings.values | count > 0 %}
+      {{ (readings.values | max) < (path_b_lux_threshold | float) }}
+    {% else %}
+      {{ is_state('sun.sun', 'below_horizon') }}
+    {% endif %}
+  path_b_dark_source: >-
+    {% set readings = namespace(count=0) %}
+    {% for lux_sensor in expand(path_b_lux_entities) %}
+      {% if is_number(lux_sensor.state) %}{% set readings.count = readings.count + 1 %}{% endif %}
+    {% endfor %}
+    {{ 'lux' if readings.count > 0 else 'sun_fallback' if is_state('sun.sun', 'below_horizon') else 'denied' }}
+
+trigger_variables:
+  cleanup_start_text: !input sleep_start_time
+  cleanup_end_text: !input sleep_end_time
+  cleanup_sleep_mode: !input helper_sleep_mode
+  cleanup_get_up_mode: !input helper_get_up_mode
 
 trigger:
+  # 0. 时间窗口开始：补齐“提前上床且已关灯”的状态
+  - platform: time
+    at: !input sleep_start_time
+    id: "window_start"
+
   # 1. 压力传感器：有人
   - platform: state
     entity_id: !input pressure_sensor
@@ -263,6 +449,48 @@ trigger:
     to: "on"
     id: "motion_path_b"
 
+  # 7. 结束时间后 30 分钟：独立触发，不阻塞 queued 动作
+  - platform: template
+    value_template: >-
+      {% set start_parts = cleanup_start_text.split(':') %}
+      {% set end_parts = cleanup_end_text.split(':') %}
+      {% set start_second = (start_parts[0] | int) * 3600 + (start_parts[1] | int) * 60 + (start_parts[2] | int) %}
+      {% set end_second = (end_parts[0] | int) * 3600 + (end_parts[1] | int) * 60 + (end_parts[2] | int) %}
+      {% set cleanup_second = (end_second + 1800) % 86400 %}
+      {% set current_second = now().hour * 3600 + now().minute * 60 + now().second %}
+      {% set schedule_valid = ((start_second - end_second) % 86400) > 1800 %}
+      {% if not schedule_valid %}
+        {% set in_main = false %}
+      {% elif start_second < end_second %}
+        {% set in_main = start_second <= current_second < end_second %}
+      {% elif start_second > end_second %}
+        {% set in_main = current_second >= start_second or current_second < end_second %}
+      {% else %}
+        {% set in_main = false %}
+      {% endif %}
+      {% if end_second < cleanup_second %}
+        {% set in_grace = end_second <= current_second < cleanup_second %}
+      {% else %}
+        {% set in_grace = current_second >= end_second or current_second < cleanup_second %}
+      {% endif %}
+      {% set seconds_overdue = (current_second - cleanup_second) % 86400 %}
+      {% set initial_retry = seconds_overdue < 60 %}
+      {% set periodic_retry = now().minute % 5 == 0 and now().second < 60 %}
+      {{ not in_main and not in_grace
+         and (initial_retry or periodic_retry)
+         and (is_state(cleanup_sleep_mode, 'on') or is_state(cleanup_get_up_mode, 'on')) }}
+    id: "cleanup_deadline"
+
+  # 8. HA 重启后补偿已经错过的清理时刻
+  - platform: homeassistant
+    event: start
+    id: "ha_start_reconcile"
+
+  # 9. 自动化/蓝图重载后补偿已经错过的清理时刻
+  - platform: event
+    event_type: automation_reloaded
+    id: "automation_reload_reconcile"
+
 action:
   - choose:
       # ===================================================
@@ -275,10 +503,11 @@ action:
                 id: "pressure_on"
               - condition: trigger
                 id: "lights_group_off" # 灯组全关
+              - condition: trigger
+                id: "window_start"
           # 🔴 时间限制
-          - condition: time
-            after: !input sleep_start_time
-            before: !input sleep_end_time
+          - condition: template
+            value_template: "{{ is_main_window }}"
           - condition: state
             entity_id: !input helper_get_up_mode
             state: "off"
@@ -312,15 +541,40 @@ action:
             state: "on"
         sequence:
           - service: light.turn_off
-            target: !input lights_to_turn_off
-          - service: light.turn_off
             target: !input bedside_lights
+          - if:
+              - condition: template
+                value_template: "{{ passage_lights_target | length > 0 }}"
+            then:
+              - service: light.turn_off
+                target: !input path_passage_lights
+          - if:
+              - condition: template
+                value_template: "{{ path_a_lights_target | length > 0 }}"
+            then:
+              - service: light.turn_off
+                target: !input path_a_lights
+          - if:
+              - condition: template
+                value_template: "{{ path_b_lights_target | length > 0 }}"
+            then:
+              - service: light.turn_off
+                target: !input path_b_lights
           - service: input_boolean.turn_off
             target:
               entity_id: !input helper_get_up_mode
-          - service: input_boolean.turn_on
-            target:
-              entity_id: !input helper_sleep_mode
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ is_main_window }}"
+                sequence:
+                  - service: input_boolean.turn_on
+                    target:
+                      entity_id: !input helper_sleep_mode
+            default:
+              - service: input_boolean.turn_off
+                target:
+                  entity_id: !input helper_sleep_mode
 
       # ===================================================
       # 场景 3: 起夜下床 (床边触发)
@@ -329,9 +583,8 @@ action:
           - condition: trigger
             id: "motion_bedside"
           # 🔴 时间限制
-          - condition: time
-            after: !input sleep_start_time
-            before: !input sleep_end_time
+          - condition: template
+            value_template: "{{ is_main_window }}"
           - condition: state
             entity_id: !input helper_sleep_mode
             state: "on"
@@ -368,11 +621,15 @@ action:
           - service: input_boolean.turn_off
             target:
               entity_id: !input helper_sleep_mode
-          - service: light.turn_on
-            target: !input bedside_lights
-            data:
-              brightness_pct: !input bedside_brightness
-              color_temp_kelvin: !input bedside_kelvin
+          - if:
+              - condition: template
+                value_template: "{{ is_bedroom_dark }}"
+            then:
+              - service: light.turn_on
+                target: !input bedside_lights
+                data:
+                  brightness_pct: !input bedside_brightness
+                  color_temp_kelvin: !input bedside_kelvin
 
       # ===================================================
       # 场景 4: 离开床铺
@@ -391,12 +648,15 @@ action:
       - conditions:
           - condition: trigger
             id: "motion_passage"
-          - condition: time
-            after: !input sleep_start_time
-            before: !input sleep_end_time
+          - condition: template
+            value_template: "{{ is_main_window or is_grace_window }}"
           - condition: state
             entity_id: !input helper_get_up_mode
             state: "on"
+          - condition: template
+            value_template: "{{ is_passage_dark }}"
+          - condition: template
+            value_template: "{{ passage_lights_target | length > 0 }}"
         sequence:
           - service: light.turn_on
             target: !input path_passage_lights
@@ -407,12 +667,15 @@ action:
       - conditions:
           - condition: trigger
             id: "motion_path_a"
-          - condition: time
-            after: !input sleep_start_time
-            before: !input sleep_end_time
+          - condition: template
+            value_template: "{{ is_main_window or is_grace_window }}"
           - condition: state
             entity_id: !input helper_get_up_mode
             state: "on"
+          - condition: template
+            value_template: "{{ is_path_a_dark }}"
+          - condition: template
+            value_template: "{{ path_a_lights_target | length > 0 }}"
         sequence:
           - service: light.turn_on
             target: !input path_a_lights
@@ -423,12 +686,15 @@ action:
       - conditions:
           - condition: trigger
             id: "motion_path_b"
-          - condition: time
-            after: !input sleep_start_time
-            before: !input sleep_end_time
+          - condition: template
+            value_template: "{{ is_main_window or is_grace_window }}"
           - condition: state
             entity_id: !input helper_get_up_mode
             state: "on"
+          - condition: template
+            value_template: "{{ is_path_b_dark }}"
+          - condition: template
+            value_template: "{{ path_b_lights_target | length > 0 }}"
         sequence:
           - service: light.turn_on
             target: !input path_b_lights
@@ -455,3 +721,60 @@ action:
             target:
               entity_id: !input helper_sleep_mode
           # 不需要操作 get_up_mode，因为它已经是 off
+
+      # ===================================================
+      # 场景 9: 收尾截止清理
+      # ===================================================
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "cleanup_deadline"
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id:
+                      - "ha_start_reconcile"
+                      - "automation_reload_reconcile"
+                  - condition: template
+                    value_template: "{{ not is_main_window and not is_grace_window }}"
+                  - condition: or
+                    conditions:
+                      - condition: state
+                        entity_id: !input helper_sleep_mode
+                        state: "on"
+                      - condition: state
+                        entity_id: !input helper_get_up_mode
+                        state: "on"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input helper_get_up_mode
+                    state: "on"
+                sequence:
+                  - service: light.turn_off
+                    target: !input bedside_lights
+                  - if:
+                      - condition: template
+                        value_template: "{{ passage_lights_target | length > 0 }}"
+                    then:
+                      - service: light.turn_off
+                        target: !input path_passage_lights
+                  - if:
+                      - condition: template
+                        value_template: "{{ path_a_lights_target | length > 0 }}"
+                    then:
+                      - service: light.turn_off
+                        target: !input path_a_lights
+                  - if:
+                      - condition: template
+                        value_template: "{{ path_b_lights_target | length > 0 }}"
+                    then:
+                      - service: light.turn_off
+                        target: !input path_b_lights
+          - service: input_boolean.turn_off
+            target:
+              entity_id:
+                - !input helper_sleep_mode
+                - !input helper_get_up_mode
