@@ -1,0 +1,898 @@
+blueprint:
+  name: Frigate Review 视觉分类与通知
+  description: >-
+    对未归属门周期的 Frigate Review 做一次低分辨率视频分析，覆盖门口快递/访客、
+    门铃/夜间活动以及电梯间物业保洁等场景。媒体上传由外部动作完成；蓝图不会创建
+    Helpers、绘制 Frigate zones 或保存媒体凭证。
+  domain: automation
+  author: kaattz
+  source_url: https://github.com/kaattz/ha-blueprints/blob/main/frigate_review_vision.yaml
+  homeassistant:
+    min_version: "2026.8.0"
+  input:
+    frigate:
+      name: Frigate Review
+      icon: mdi:cctv
+      input:
+        review_topic:
+          name: Review MQTT topic
+          default: frigate/reviews
+          selector:
+            text:
+        camera_name:
+          name: Frigate camera name
+          selector:
+            text:
+        home_door_zone:
+          name: Home door zone
+          default: home_door
+          selector:
+            text:
+        elevator_zone:
+          name: Elevator zone
+          default: elevator
+          selector:
+            text:
+        bench_zone:
+          name: Bench zone
+          default: bench
+          selector:
+            text:
+        review_base_url:
+          name: Frigate local base URL
+          description: 例如 http://192.168.1.20:5000，用于生成本地 Review 查看链接。
+          selector:
+            text:
+    state:
+      name: 状态与去重
+      icon: mdi:database-check-outline
+      input:
+        door_cycle_active_entity:
+          name: Door cycle active helper
+          selector:
+            entity:
+              domain: input_boolean
+        door_cycle_review_ids_entity:
+          name: Reviews assigned to current door cycle
+          description: 逗号分隔的 Review ID，由门周期采集器维护。
+          selector:
+            entity:
+              domain: input_text
+        processed_review_ids_entity:
+          name: Recently processed Review IDs
+          description: 最近完成 ID的兼容性缓存；完整阶段状态由媒体处理器按稳定任务 ID保证。
+          selector:
+            entity:
+              domain: input_text
+        doorbell_recent_entity:
+          name: Doorbell recent helper
+          description: 门铃自动化在关联窗口内置为 on，Review结束后再复位。
+          selector:
+            entity:
+              domain: input_boolean
+        shadow_mode_entity:
+          name: Shadow mode helper
+          selector:
+            entity:
+              domain: input_boolean
+    ai_and_actions:
+      name: AI、媒体与通知
+      icon: mdi:brain
+      input:
+        conversation_agent:
+          name: Vision conversation agent
+          selector:
+            entity:
+              domain: conversation
+        media_shell_command_action:
+          name: Media shell command action
+          description: >-
+            必须是 shell_command.*。命令接收 operation；媒体请求接收 task_id、mode、
+            review_id、camera，工作流请求接收 workflow_payload_base64，并在 stdout/stderr
+            返回媒体处理器的单个 JSON对象。
+          selector:
+            text:
+        notification_action:
+          name: Notification action
+          description: >-
+            可使用 notification_title、notification_message、notification_image_url、
+            notification_video_url、notification_review_url、notification_classification
+            和稳定的 notification_tag。
+          selector:
+            action:
+
+mode: queued
+max: 10
+max_exceeded: error
+
+variables:
+  camera_name: !input camera_name
+  home_door_zone: !input home_door_zone
+  elevator_zone: !input elevator_zone
+  bench_zone: !input bench_zone
+  review_base_url: !input review_base_url
+  door_cycle_active_entity: !input door_cycle_active_entity
+  door_cycle_review_ids_entity: !input door_cycle_review_ids_entity
+  processed_review_ids_entity: !input processed_review_ids_entity
+  doorbell_recent_entity: !input doorbell_recent_entity
+  shadow_mode_entity: !input shadow_mode_entity
+  media_shell_command_action: !input media_shell_command_action
+
+triggers:
+  - trigger: mqtt
+    topic: !input review_topic
+    id: review_mqtt
+
+conditions: []
+
+actions:
+  - variables:
+      payload: "{{ trigger.payload | from_json({}) }}"
+      review_type: >-
+        {{ payload.get('type', '') if payload is mapping else '' }}
+      review: >-
+        {{ payload.get('after', {}) if payload is mapping and payload.get('after', {}) is mapping else {} }}
+      review_data: >-
+        {{ review.get('data', {}) if review is mapping and review.get('data', {}) is mapping else {} }}
+      review_id: "{{ review.get('id', '') | string }}"
+      review_camera: "{{ review.get('camera', '') | string }}"
+      review_objects: >-
+        {{ review_data.get('objects', []) if review_data.get('objects', []) is iterable
+           and review_data.get('objects', []) is not string else [] }}
+      review_zones: >-
+        {{ review_data.get('zones', []) if review_data.get('zones', []) is iterable
+           and review_data.get('zones', []) is not string else [] }}
+      configured_zones:
+        - "{{ home_door_zone }}"
+        - "{{ elevator_zone }}"
+        - "{{ bench_zone }}"
+      has_home_door: "{{ home_door_zone in review_zones }}"
+      has_bench: "{{ bench_zone in review_zones }}"
+      has_elevator: "{{ elevator_zone in review_zones }}"
+      doorbell_recent: "{{ is_state(doorbell_recent_entity, 'on') }}"
+      is_night: "{{ now().hour >= 23 or now().hour < 5 }}"
+      processed_state: "{{ states(processed_review_ids_entity) }}"
+      processed_review_ids: >-
+        {{ [] if processed_state in ['unknown', 'unavailable', 'none', '']
+           else processed_state.split(',') | map('trim') | reject('eq', '') | list }}
+      assigned_state: "{{ states(door_cycle_review_ids_entity) }}"
+      assigned_review_ids: >-
+        {{ [] if assigned_state in ['unknown', 'unavailable', 'none', '']
+           else assigned_state.split(',') | map('trim') | reject('eq', '') | list }}
+
+  - if:
+      - condition: template
+        value_template: "{{ review_type != 'end' }}"
+    then:
+      - stop: review_not_end
+
+  - if:
+      - condition: template
+        value_template: >-
+          {{ review_id | length == 0 or review_id | length > 64
+             or not (review_id | regex_match('^[A-Za-z0-9_.-]+$'))
+             or review_camera | length == 0
+             or review_objects is not iterable
+             or review_zones is not iterable }}
+    then:
+      - stop: invalid_review_payload
+        error: true
+
+  - if:
+      - condition: template
+        value_template: "{{ review_camera != camera_name or 'person' not in review_objects }}"
+    then:
+      - stop: review_not_target_person
+
+  - if:
+      - condition: template
+        value_template: >-
+          {{ review_id in assigned_review_ids
+             or (is_state(door_cycle_active_entity, 'on') and review_id in assigned_review_ids) }}
+    then:
+      - stop: review_belongs_to_door_cycle
+
+  - variables:
+      is_door_activity: "{{ has_home_door or has_bench or doorbell_recent or is_night }}"
+      is_elevator_activity: "{{ has_elevator }}"
+
+  - if:
+      - condition: template
+        value_template: "{{ not is_door_activity and not is_elevator_activity }}"
+    then:
+      - stop: review_outside_configured_zones
+
+  - variables:
+      review_kind: >-
+        {% if has_home_door or has_bench %}door
+        {% elif has_elevator %}elevator
+        {% else %}door{% endif %}
+      review_url: >-
+        {{ review_base_url | regex_replace('/+$', '') }}/review?id={{ review_id }}
+      media_request:
+        request_id: "review_{{ review_id }}"
+        review_id: "{{ review_id }}"
+        camera: "{{ review_camera }}"
+        review_kind: "{{ review_kind }}"
+        review_url: "{{ review_url }}"
+        media_kind: review_preview
+        require_evidence_frame: true
+
+  - if:
+      - condition: template
+        value_template: "{{ is_state(shadow_mode_entity, 'on') }}"
+    then:
+      - event: frigate_review_shadow_decision
+        event_data:
+          review_id: "{{ review_id }}"
+          camera: "{{ review_camera }}"
+          review_kind: "{{ review_kind }}"
+          zones: "{{ review_zones }}"
+      - stop: shadow_mode_no_media_no_llm_no_notification
+
+  - if:
+      - condition: template
+        value_template: >-
+          {{ not (media_shell_command_action | regex_match('^shell_command\.[a-z0-9_]+$')) }}
+    then:
+      - stop: invalid_media_shell_command_action
+        error: true
+
+  - variables:
+      workflow_open_payload:
+        command: open
+        task_id: "{{ media_request.request_id }}"
+        review_id: "{{ review_id }}"
+        camera: "{{ review_camera }}"
+        review_url: "{{ review_url }}"
+        review_kind: "{{ review_kind }}"
+      workflow_open_result: {}
+
+  - alias: workflow_open
+    action: "{{ media_shell_command_action }}"
+    data:
+      operation: workflow
+      workflow_payload_base64: "{{ workflow_open_payload | to_json | base64_encode }}"
+    response_variable: workflow_open_result
+    continue_on_error: true
+
+  - variables:
+      workflow_open_returncode: >-
+        {{ workflow_open_result.get('returncode', -1) | int(-1)
+           if workflow_open_result is mapping else -1 }}
+      workflow_open_output: >-
+        {{ workflow_open_result.get('stdout', '') | string
+           if workflow_open_result is mapping else '' }}
+      workflow_state: "{{ workflow_open_output | from_json({}) }}"
+      workflow_stage: >-
+        {{ workflow_state.get('stage', '') | string if workflow_state is mapping else '' }}
+      workflow_data: >-
+        {{ workflow_state.get('data', {}) if workflow_state is mapping
+           and workflow_state.get('data', {}) is mapping else {} }}
+      notification_tag: "frigate_review_{{ review_id }}"
+
+  - if:
+      - condition: template
+        value_template: >-
+          {{ workflow_open_returncode != 0 or workflow_state is not mapping
+             or workflow_state.get('status', '') != 'workflow_state'
+             or workflow_state.get('task_id', '') != media_request.request_id
+             or workflow_state.get('review_id', '') != review_id }}
+    then:
+      - action: persistent_notification.create
+        data:
+          notification_id: "{{ notification_tag }}"
+          title: 监控 AI 状态存储失败
+          message: >-
+            Review {{ review_id }} 无法读取持久状态（workflow_open_failed），请打开
+            {{ review_url }} 人工查看。系统未调用 LLM。
+      - stop: workflow_open_failed
+        error: true
+
+  - if:
+      - condition: template
+        value_template: "{{ workflow_stage == 'done' }}"
+    then:
+      - stop: review_already_processed
+
+  - if:
+      - condition: template
+        value_template: "{{ workflow_stage == 'failed' }}"
+    then:
+      - variables:
+          terminal_error_code: "{{ workflow_data.get('error_code', 'workflow_terminal_state') | string }}"
+          notification_title: 监控 AI 任务异常
+          notification_message: >-
+            Review {{ review_id }} 已停止（{{ terminal_error_code }}）。系统不会自动重复调用
+            LLM或正式通知，请打开 Review查看。
+          notification_image_url: "{{ workflow_data.get('evidence_image_url', '') | string }}"
+          notification_video_url: "{{ workflow_data.get('video_url', '') | string }}"
+          notification_review_url: "{{ review_url }}"
+          notification_classification: "{{ terminal_error_code }}"
+      - action: persistent_notification.create
+        data:
+          notification_id: "{{ notification_tag }}"
+          title: "{{ notification_title }}"
+          message: "{{ notification_message }} {{ notification_review_url }}"
+      - stop: workflow_terminal_state
+
+  - if:
+      - condition: template
+        value_template: "{{ workflow_stage in ['analysis_started', 'notification_started'] }}"
+    then:
+      - variables:
+          uncertain_error_code: >-
+            {{ 'analysis_outcome_unknown'
+               if workflow_stage == 'analysis_started'
+               else 'notification_delivery_unknown' }}
+          workflow_uncertain_payload:
+            command: transition
+            task_id: "{{ media_request.request_id }}"
+            expected_stage: "{{ workflow_stage }}"
+            next_stage: failed
+            data:
+              error_code: "{{ uncertain_error_code }}"
+          workflow_uncertain_result: {}
+      - alias: workflow_mark_uncertain_failed
+        action: "{{ media_shell_command_action }}"
+        data:
+          operation: workflow
+          workflow_payload_base64: "{{ workflow_uncertain_payload | to_json | base64_encode }}"
+        response_variable: workflow_uncertain_result
+        continue_on_error: true
+      - variables:
+          workflow_uncertain_state: >-
+            {{ workflow_uncertain_result.get('stdout', '') | from_json({}) }}
+      - if:
+          - condition: template
+            value_template: >-
+              {{ workflow_uncertain_state.get('status', '') != 'workflow_state'
+                 or workflow_uncertain_state.get('task_id', '') != media_request.request_id
+                 or workflow_uncertain_state.get('review_id', '') != review_id
+                 or workflow_uncertain_state.get('stage', '') != 'failed'
+                 or workflow_uncertain_state.get('data', {}).get('error_code', '') != uncertain_error_code }}
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: "{{ notification_tag }}"
+              title: 监控 AI 失败状态写入失败
+              message: >-
+                Review {{ review_id }} 的不确定状态未能持久化。系统不会继续执行，请打开
+                {{ review_url }} 人工查看。
+          - stop: workflow_uncertain_failure_not_persisted
+            error: true
+      - variables:
+          notification_title: 监控 AI 结果未确认
+          notification_message: >-
+            Review {{ review_id }} 在 {{ workflow_stage }} 阶段中断（{{ uncertain_error_code }}）。
+            系统已自动停止，未重复调用 LLM或补发正式通知。
+          notification_image_url: "{{ workflow_data.get('evidence_image_url', '') | string }}"
+          notification_video_url: "{{ workflow_data.get('video_url', '') | string }}"
+          notification_review_url: "{{ review_url }}"
+          notification_classification: "{{ uncertain_error_code }}"
+      - action: persistent_notification.create
+        data:
+          notification_id: "{{ notification_tag }}"
+          title: "{{ notification_title }}"
+          message: "{{ notification_message }} {{ notification_review_url }}"
+      - if:
+          - condition: template
+            value_template: "{{ workflow_stage == 'analysis_started' }}"
+        then: !input notification_action
+      - stop: "workflow_uncertain: {{ uncertain_error_code }}"
+
+  - if:
+      - condition: template
+        value_template: "{{ workflow_stage == 'received' }}"
+    then:
+      - variables:
+          media_command_result: {}
+      - action: "{{ media_shell_command_action }}"
+        data:
+          operation: media
+          task_id: "{{ media_request.request_id }}"
+          mode: review_preview
+          review_id: "{{ media_request.review_id }}"
+          camera: "{{ media_request.camera }}"
+        response_variable: media_command_result
+        continue_on_error: true
+      - variables:
+          media_returncode: >-
+            {{ media_command_result.get('returncode', -1) | int(-1)
+               if media_command_result is mapping else -1 }}
+          media_stdout: >-
+            {{ media_command_result.get('stdout', '') | string
+               if media_command_result is mapping else '' }}
+          media_stderr: >-
+            {{ media_command_result.get('stderr', '') | string
+               if media_command_result is mapping else '' }}
+          media_output: "{{ media_stdout if media_returncode == 0 else media_stderr }}"
+          media_result: "{{ media_output | from_json({}) }}"
+          media_review_id: >-
+            {{ media_result.get('review_id', '') | string if media_result is mapping else '' }}
+      - if:
+          - condition: template
+            value_template: >-
+              {{ media_returncode != 0 or media_result is not mapping
+                 or media_result.get('status', '') not in ['ready', 'failed']
+                 or media_result.get('status', '') == 'failed' }}
+        then:
+          - variables:
+              media_error_code: >-
+                {{ 'media_command_invalid_result'
+                   if media_result is not mapping
+                      or media_result.get('status', '') not in ['ready', 'failed']
+                   else media_result.get('error_code', 'media_command_failed') | string }}
+              workflow_media_failed_payload:
+                command: transition
+                task_id: "{{ media_request.request_id }}"
+                expected_stage: received
+                next_stage: failed
+                data:
+                  error_code: "{{ media_error_code }}"
+              workflow_media_failed_result: {}
+          - action: "{{ media_shell_command_action }}"
+            data:
+              operation: workflow
+              workflow_payload_base64: "{{ workflow_media_failed_payload | to_json | base64_encode }}"
+            response_variable: workflow_media_failed_result
+            continue_on_error: true
+          - variables:
+              workflow_media_failed_state: >-
+                {{ workflow_media_failed_result.get('stdout', '') | from_json({}) }}
+          - if:
+              - condition: template
+                value_template: >-
+                  {{ workflow_media_failed_state.get('status', '') != 'workflow_state'
+                     or workflow_media_failed_state.get('task_id', '') != media_request.request_id
+                     or workflow_media_failed_state.get('review_id', '') != review_id
+                     or workflow_media_failed_state.get('stage', '') != 'failed'
+                     or workflow_media_failed_state.get('data', {}).get('error_code', '') != media_error_code }}
+            then:
+              - action: persistent_notification.create
+                data:
+                  notification_id: "{{ notification_tag }}"
+                  title: 监控 AI 失败状态写入失败
+                  message: >-
+                    Review {{ review_id }} 的媒体失败状态未能持久化。系统不会发送重复提醒，
+                    请打开 {{ review_url }} 人工查看。
+              - stop: workflow_media_failure_not_persisted
+                error: true
+          - variables:
+              notification_title: AI分析失败
+              notification_message: >-
+                媒体处理失败（{{ media_error_code }}）。系统未调用 LLM，请打开 Review人工查看。
+              notification_image_url: ""
+              notification_video_url: ""
+              notification_review_url: "{{ review_url }}"
+              notification_classification: "{{ media_error_code }}"
+          - action: persistent_notification.create
+            data:
+              notification_id: "{{ notification_tag }}"
+              title: "{{ notification_title }}"
+              message: "{{ notification_message }} {{ notification_review_url }}"
+          - if:
+              - condition: template
+                value_template: "{{ true }}"
+            then: !input notification_action
+          - stop: "media_command_failed: {{ media_error_code }}"
+            error: true
+      - if:
+          - condition: template
+            value_template: "{{ media_review_id != review_id }}"
+        then:
+          - variables:
+              workflow_media_mismatch_payload:
+                command: transition
+                task_id: "{{ media_request.request_id }}"
+                expected_stage: received
+                next_stage: failed
+                data:
+                  error_code: media_review_id_mismatch
+              workflow_media_mismatch_result: {}
+          - alias: workflow_fail_media_mismatch
+            action: "{{ media_shell_command_action }}"
+            data:
+              operation: workflow
+              workflow_payload_base64: "{{ workflow_media_mismatch_payload | to_json | base64_encode }}"
+            response_variable: workflow_media_mismatch_result
+          - action: persistent_notification.create
+            data:
+              notification_id: "{{ notification_tag }}"
+              title: 监控 AI 媒体校验失败
+              message: >-
+                Review {{ review_id }} 的媒体返回 ID不匹配。系统未调用 LLM，请打开
+                {{ review_url }} 人工查看。
+          - stop: media_review_id_mismatch
+            error: true
+      - variables:
+          workflow_media_ready_payload:
+            command: transition
+            task_id: "{{ media_request.request_id }}"
+            expected_stage: received
+            next_stage: media_ready
+            data:
+              video_url: "{{ media_result.get('video_url', '') | string }}"
+              evidence_image_url: "{{ media_result.get('evidence_image_url', '') | string }}"
+              evidence_frame_fallback: "{{ media_result.get('evidence_frame_fallback', false) | bool }}"
+          workflow_media_ready_result: {}
+      - alias: workflow_mark_media_ready
+        action: "{{ media_shell_command_action }}"
+        data:
+          operation: workflow
+          workflow_payload_base64: "{{ workflow_media_ready_payload | to_json | base64_encode }}"
+        response_variable: workflow_media_ready_result
+      - variables:
+          workflow_state: "{{ workflow_media_ready_result.get('stdout', '') | from_json({}) }}"
+          workflow_stage: "{{ workflow_state.get('stage', '') | string }}"
+          workflow_data: "{{ workflow_state.get('data', {}) }}"
+
+  - variables:
+      workflow_get_after_media_payload:
+        command: get
+        task_id: "{{ media_request.request_id }}"
+      workflow_get_after_media_result: {}
+
+  - alias: workflow_get_after_media
+    action: "{{ media_shell_command_action }}"
+    data:
+      operation: workflow
+      workflow_payload_base64: "{{ workflow_get_after_media_payload | to_json | base64_encode }}"
+    response_variable: workflow_get_after_media_result
+
+  - variables:
+      workflow_state: "{{ workflow_get_after_media_result.get('stdout', '') | from_json({}) }}"
+      workflow_stage: "{{ workflow_state.get('stage', '') | string }}"
+      workflow_data: >-
+        {{ workflow_state.get('data', {}) if workflow_state.get('data', {}) is mapping else {} }}
+
+  - variables:
+      allowed_tags: >-
+        {{ ['package_left', 'handed_over', 'suspected_delivery', 'visitor_or_unknown']
+           if review_kind == 'door'
+           else ['property_cleaning', 'maintenance', 'visitor_activity', 'unknown_activity'] }}
+      video_url: "{{ workflow_data.get('video_url', '') | string }}"
+      evidence_image_url: "{{ workflow_data.get('evidence_image_url', '') | string }}"
+      evidence_frame_fallback: "{{ workflow_data.get('evidence_frame_fallback', false) | bool }}"
+      analysis_prompt: >-
+        {% if review_kind == 'door' %}
+        这是住宅门口 Frigate Review Preview。只根据完整视频动作，从以下标签中严格选择一个：
+        package_left（清楚看到放下包裹/外卖并离开）、handed_over（清楚看到当面交付）、
+        suspected_delivery（疑似送件或放置但证据不足）、visitor_or_unknown（普通访客或无法判断）。
+        不得因服装或携带物品猜测职业。message 用中文客观描述人物外观、动作、物品件数和最终位置；
+        看不清时明确说无法确认。只返回一个标签。
+        {% else %}
+        这是住宅电梯间 Frigate Review Preview。只根据完整视频动作，从以下标签中严格选择一个：
+        property_cleaning（连续清楚看到扫地、拖地或擦拭）、maintenance（明确维修动作）、
+        visitor_activity（等候、停留或其他人物活动）、unknown_activity（无法判断）。
+        只有连续清扫动作清楚可见时才能选择 property_cleaning，不能根据时长、制服、年龄或携带物品判断。
+        message 用中文客观描述人物特征和动作。只返回一个标签。
+        {% endif %}
+
+  - if:
+      - condition: template
+        value_template: "{{ workflow_stage == 'media_ready' }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ video_url | length == 0 or evidence_image_url | length == 0 }}"
+        then:
+          - variables:
+              workflow_media_invalid_payload:
+                command: transition
+                task_id: "{{ media_request.request_id }}"
+                expected_stage: media_ready
+                next_stage: failed
+                data:
+                  error_code: media_ready_without_required_url
+              workflow_media_invalid_result: {}
+          - action: "{{ media_shell_command_action }}"
+            data:
+              operation: workflow
+              workflow_payload_base64: "{{ workflow_media_invalid_payload | to_json | base64_encode }}"
+            response_variable: workflow_media_invalid_result
+          - action: persistent_notification.create
+            data:
+              notification_id: "{{ notification_tag }}"
+              title: 监控 AI 媒体结果无效
+              message: >-
+                Review {{ review_id }} 缺少视频或证据图。系统未调用 LLM，请打开
+                {{ review_url }} 人工查看。
+          - stop: media_ready_without_video_url
+            error: true
+      - variables:
+          workflow_analysis_started_payload:
+            command: transition
+            task_id: "{{ media_request.request_id }}"
+            expected_stage: media_ready
+            next_stage: analysis_started
+          workflow_analysis_started_result: {}
+      - alias: workflow_mark_analysis_started
+        action: "{{ media_shell_command_action }}"
+        data:
+          operation: workflow
+          workflow_payload_base64: "{{ workflow_analysis_started_payload | to_json | base64_encode }}"
+        response_variable: workflow_analysis_started_result
+      - variables:
+          workflow_analysis_started_state: >-
+            {{ workflow_analysis_started_result.get('stdout', '') | from_json({}) }}
+      - if:
+          - condition: template
+            value_template: >-
+              {{ workflow_analysis_started_state.get('status', '') != 'workflow_state'
+                 or workflow_analysis_started_state.get('task_id', '') != media_request.request_id
+                 or workflow_analysis_started_state.get('stage', '') != 'analysis_started' }}
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: "{{ notification_tag }}"
+              title: 监控 AI 状态写入失败
+              message: >-
+                Review {{ review_id }} 未能确认 analysis_started 已持久化，因此没有调用
+                LLM。请打开 {{ review_url }} 人工查看。
+          - stop: workflow_analysis_started_not_persisted
+            error: true
+      - variables:
+          ai_result: {}
+      - action: ai_conversation.explain_media
+        data:
+          entity_id: !input conversation_agent
+          video: "{{ video_url }}"
+          prompt: "{{ analysis_prompt }}"
+          thinking: disabled
+          tags: "{{ allowed_tags }}"
+        response_variable: ai_result
+        continue_on_error: true
+      - variables:
+          result_message: >-
+            {{ ai_result.get('message', '') | string if ai_result is mapping else '' }}
+          result_tags: >-
+            {{ ai_result.get('tags', []) if ai_result is mapping
+               and ai_result.get('tags', []) is iterable
+               and ai_result.get('tags', []) is not string else [] }}
+          matched_tags: >-
+            {% set ns = namespace(items=[]) %}
+            {% for tag in result_tags %}
+              {% if tag in allowed_tags and tag not in ns.items %}
+                {% set ns.items = ns.items + [tag] %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.items }}
+      - if:
+          - condition: template
+            value_template: "{{ result_message | trim | length == 0 or matched_tags | length != 1 }}"
+        then:
+          - variables:
+              workflow_llm_failed_payload:
+                command: transition
+                task_id: "{{ media_request.request_id }}"
+                expected_stage: analysis_started
+                next_stage: failed
+                data:
+                  error_code: invalid_llm_response
+              workflow_llm_failed_result: {}
+          - action: "{{ media_shell_command_action }}"
+            data:
+              operation: workflow
+              workflow_payload_base64: "{{ workflow_llm_failed_payload | to_json | base64_encode }}"
+            response_variable: workflow_llm_failed_result
+            continue_on_error: true
+          - variables:
+              workflow_llm_failed_state: >-
+                {{ workflow_llm_failed_result.get('stdout', '') | from_json({}) }}
+          - if:
+              - condition: template
+                value_template: >-
+                  {{ workflow_llm_failed_state.get('status', '') != 'workflow_state'
+                     or workflow_llm_failed_state.get('task_id', '') != media_request.request_id
+                     or workflow_llm_failed_state.get('review_id', '') != review_id
+                     or workflow_llm_failed_state.get('stage', '') != 'failed'
+                     or workflow_llm_failed_state.get('data', {}).get('error_code', '') != 'invalid_llm_response' }}
+            then:
+              - action: persistent_notification.create
+                data:
+                  notification_id: "{{ notification_tag }}"
+                  title: 监控 AI 失败状态写入失败
+                  message: >-
+                    Review {{ review_id }} 的 LLM失败状态未能持久化。系统不会再次推送，
+                    请打开 {{ review_url }} 人工查看。
+              - stop: workflow_llm_failure_not_persisted
+                error: true
+          - variables:
+              notification_title: AI分析失败
+              notification_message: "模型返回无效分类（invalid_llm_response），系统不会自动重试。"
+              notification_image_url: "{{ evidence_image_url }}"
+              notification_video_url: "{{ video_url }}"
+              notification_review_url: "{{ review_url }}"
+              notification_classification: invalid_llm_response
+          - action: persistent_notification.create
+            data:
+              notification_id: "{{ notification_tag }}"
+              title: "{{ notification_title }}"
+              message: "{{ notification_message }} {{ notification_review_url }}"
+          - if:
+              - condition: template
+                value_template: "{{ true }}"
+            then: !input notification_action
+          - stop: invalid_llm_response
+            error: true
+      - variables:
+          workflow_analysis_done_payload:
+            command: transition
+            task_id: "{{ media_request.request_id }}"
+            expected_stage: analysis_started
+            next_stage: analysis_done
+            data:
+              classification: "{{ matched_tags[0] }}"
+              message: "{{ result_message | trim }}"
+          workflow_analysis_done_result: {}
+      - alias: workflow_mark_analysis_done
+        action: "{{ media_shell_command_action }}"
+        data:
+          operation: workflow
+          workflow_payload_base64: "{{ workflow_analysis_done_payload | to_json | base64_encode }}"
+        response_variable: workflow_analysis_done_result
+      - variables:
+          workflow_state: "{{ workflow_analysis_done_result.get('stdout', '') | from_json({}) }}"
+          workflow_stage: "{{ workflow_state.get('stage', '') | string }}"
+          workflow_data: "{{ workflow_state.get('data', {}) }}"
+
+  - variables:
+      workflow_get_after_analysis_payload:
+        command: get
+        task_id: "{{ media_request.request_id }}"
+      workflow_get_after_analysis_result: {}
+
+  - alias: workflow_get_after_analysis
+    action: "{{ media_shell_command_action }}"
+    data:
+      operation: workflow
+      workflow_payload_base64: "{{ workflow_get_after_analysis_payload | to_json | base64_encode }}"
+    response_variable: workflow_get_after_analysis_result
+
+  - variables:
+      workflow_state: "{{ workflow_get_after_analysis_result.get('stdout', '') | from_json({}) }}"
+      workflow_stage: "{{ workflow_state.get('stage', '') | string }}"
+      workflow_data: >-
+        {{ workflow_state.get('data', {}) if workflow_state.get('data', {}) is mapping else {} }}
+
+  - if:
+      - condition: template
+        value_template: "{{ workflow_stage != 'analysis_done' }}"
+    then:
+      - stop: invalid_workflow_resume_stage
+        error: true
+
+  - variables:
+      classification: "{{ workflow_data.get('classification', '') | string }}"
+      result_message: "{{ workflow_data.get('message', '') | string }}"
+      video_url: "{{ workflow_data.get('video_url', '') | string }}"
+      evidence_image_url: "{{ workflow_data.get('evidence_image_url', '') | string }}"
+      evidence_frame_fallback: "{{ workflow_data.get('evidence_frame_fallback', false) | bool }}"
+
+  - if:
+      - condition: template
+        value_template: >-
+          {{ classification not in allowed_tags or result_message | trim | length == 0
+             or video_url | length == 0 or evidence_image_url | length == 0 }}
+    then:
+      - variables:
+          workflow_invalid_analysis_payload:
+            command: transition
+            task_id: "{{ media_request.request_id }}"
+            expected_stage: analysis_done
+            next_stage: failed
+            data:
+              error_code: invalid_saved_analysis
+          workflow_invalid_analysis_result: {}
+      - alias: workflow_fail_invalid_saved_analysis
+        action: "{{ media_shell_command_action }}"
+        data:
+          operation: workflow
+          workflow_payload_base64: "{{ workflow_invalid_analysis_payload | to_json | base64_encode }}"
+        response_variable: workflow_invalid_analysis_result
+      - action: persistent_notification.create
+        data:
+          notification_id: "{{ notification_tag }}"
+          title: 监控 AI 已保存结果无效
+          message: >-
+            Review {{ review_id }} 的已保存分析结果无法用于通知。系统没有重新调用 LLM，
+            请打开 {{ review_url }} 人工查看。
+      - stop: invalid_saved_analysis
+        error: true
+
+  - variables:
+      notification_title: >-
+        {% if classification == 'package_left' %}快递/外卖已放门口
+        {% elif classification == 'handed_over' %}快递/外卖已当面收取
+        {% elif classification == 'suspected_delivery' %}门口疑似有快递
+        {% elif classification == 'property_cleaning' %}电梯间疑似物业保洁
+        {% elif classification == 'maintenance' %}电梯间有人维修
+        {% elif classification == 'visitor_activity' %}电梯间有人活动
+        {% elif classification == 'unknown_activity' %}电梯间活动无法判断
+        {% else %}门口有人活动{% endif %}
+      evidence_note: >-
+        {{ '附图是最佳人物快照，不能证明包裹仍留在门口。'
+           if evidence_frame_fallback else '' }}
+      notification_message: >-
+        {{ result_message | trim }}{% if evidence_note %} {{ evidence_note }}{% endif %}
+      notification_image_url: "{{ evidence_image_url }}"
+      notification_video_url: "{{ video_url }}"
+      notification_review_url: "{{ review_url }}"
+      notification_classification: "{{ classification }}"
+      workflow_notification_started_payload:
+        command: transition
+        task_id: "{{ media_request.request_id }}"
+        expected_stage: analysis_done
+        next_stage: notification_started
+      workflow_notification_started_result: {}
+
+  - alias: workflow_mark_notification_started
+    action: "{{ media_shell_command_action }}"
+    data:
+      operation: workflow
+      workflow_payload_base64: "{{ workflow_notification_started_payload | to_json | base64_encode }}"
+    response_variable: workflow_notification_started_result
+
+  - variables:
+      workflow_notification_started_state: >-
+        {{ workflow_notification_started_result.get('stdout', '') | from_json({}) }}
+
+  - if:
+      - condition: template
+        value_template: >-
+          {{ workflow_notification_started_state.get('status', '') != 'workflow_state'
+             or workflow_notification_started_state.get('task_id', '') != media_request.request_id
+             or workflow_notification_started_state.get('stage', '') != 'notification_started' }}
+    then:
+      - action: persistent_notification.create
+        data:
+          notification_id: "{{ notification_tag }}"
+          title: 监控通知状态写入失败
+          message: >-
+            Review {{ review_id }} 未能确认 notification_started 已持久化，因此没有发送
+            正式通知。请打开 {{ review_url }} 人工查看。
+      - stop: workflow_notification_started_not_persisted
+        error: true
+
+  - if:
+      - condition: template
+        value_template: "{{ true }}"
+    then: !input notification_action
+
+  - variables:
+      workflow_done_payload:
+        command: transition
+        task_id: "{{ media_request.request_id }}"
+        expected_stage: notification_started
+        next_stage: done
+      workflow_done_result: {}
+
+  - alias: workflow_mark_done
+    action: "{{ media_shell_command_action }}"
+    data:
+      operation: workflow
+      workflow_payload_base64: "{{ workflow_done_payload | to_json | base64_encode }}"
+    response_variable: workflow_done_result
+
+  - variables:
+      workflow_done_state: "{{ workflow_done_result.get('stdout', '') | from_json({}) }}"
+      next_processed_ids: >-
+        {{ (processed_review_ids + [review_id])[-3:] | join(',') }}
+
+  - if:
+      - condition: template
+        value_template: "{{ workflow_done_state.get('stage', '') != 'done' }}"
+    then:
+      - stop: workflow_done_failed
+        error: true
+
+  - action: input_text.set_value
+    target:
+      entity_id: !input processed_review_ids_entity
+    data:
+      value: "{{ next_processed_ids }}"
+
+  - action: persistent_notification.dismiss
+    data:
+      notification_id: "{{ notification_tag }}"
