@@ -12,7 +12,7 @@ Pyscript 当前配置条目存在但为 `not_loaded`，必须先按系统化排�
 - 三个实例均使用 `sensor.livingroom_balcony_lux`、`weather.he_feng_tian_qi`、`input_boolean.auto_control_curtains_based_on_sunlight` 和固定 `lux_threshold: 8000`。
 - 传感器实际位于落地窗脚边，阳光进入时可直接照到；它不是仅测室外散射光的传感器。
 - `script.alert_notify` 当前通过 `bemfa_wechat.send_message` 发消息，并调用 `script.add_notification_to_file` 写入 `sensor.active_notifications`；手机 App 和原生持久通知步骤均禁用。
-- Pyscript 集成条目状态为 `not_loaded`；AppDaemon 和原生 `python_script` 未安装。MariaDB 已安装，但本功能不直接依赖数据库。
+- Pyscript 集成条目状态为 `not_loaded`；实施前检查确认 `/config/custom_components/pyscript` 目录缺失，这是配置条目无法加载的直接根因。HACS 仍记录已安装版本 `1.7.0`、最新 `2.0.1` 被跳过；官方 2.0.0 发布说明明确该版本增加 HA 2026.5+ 和 Python 3.14 支持。恢复 2.0.1 后，用户要求去掉三个旧脚本；它们已移出活动目录并保存在 `/config/pyscript_disabled/legacy-20260817/`，不参与新学习器运行。AppDaemon 和原生 `python_script` 未安装，MariaDB 已安装，但本功能不直接依赖数据库。
 - Pyscript 官方文档要求应用在 `apps` 配置中有同名条目才会加载；普通文件 I/O 应放在原生 Python 模块并通过 `task.executor` 调用。实施必须验证当前版本的 `allow_all_imports` 和应用配置生效方式。
 
 ## 文件与部署边界

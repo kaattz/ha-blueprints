@@ -1,0 +1,16 @@
+allow_all_imports: true
+
+apps:
+  sun_curtain_learning:
+    lux_sensor: sensor.livingroom_balcony_lux
+    learning_cover: cover.livingroom_curtain
+    weather_entity: weather.he_feng_tian_qi
+    automation_switch: input_boolean.auto_control_curtains_based_on_sunlight
+    artificial_light_guard: binary_sensor.lights
+    threshold_helper: input_number.sun_curtain_lux_threshold
+    learning_switch: input_boolean.sun_curtain_threshold_auto_learning
+    notify_script: script.alert_notify
+    diagnostic_entity: sensor.sun_curtain_lux_learning
+    window_azimuth: 189
+    azimuth_range: 55
+    data_dir: /config/pyscript_data

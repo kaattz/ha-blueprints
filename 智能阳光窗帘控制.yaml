@@ -1,60 +1,55 @@
 blueprint:
   name: 智能阳光窗帘控制
   description: |
-    # 🌞 智能阳光窗帘控制
+    基于太阳方位、高度角、光照强度、天气及人体存在的自动窗帘控制。
 
-    基于太阳方位、高度角、光照强度及人体存在的全自动窗帘控制系统。
+    关闭条件：
+    - 太阳方位角进入窗户范围
+    - 太阳高度角高于动态最低阈值
+    - 太阳高度角低于动态最高阈值
+    - 光照高于阈值
+    - 天气不是下雨类状态
 
-    ## ✨ 核心功能
+    打开条件：
+    - 关闭条件不再满足
+    - 光照已经低于阈值
+    - 持续达到无阳光等待时间
+    - 如果配置了人体存在传感器，还必须无人达到等待时间
 
-    1.  🛡️ **防晒/隔热**：当太阳运行到窗户朝向，且光照强烈时，自动关闭窗帘。
-    2.  🌧️ **阴雨避让**：如果天气实体显示下雨，即使方位角满足也不会误关窗帘。
-    3.  👀 **智能复位 (双模式)**：
-        *   **客厅模式** (不选人体传感器)：阳光移走后，延时自动打开窗帘，增加采光。
-        *   **卧室模式** (选择人体传感器)：阳光移走后，必须确认**室内无人**才会打开窗帘。防止你在午睡或换衣服时窗帘突然打开。
-
-    ## ⚙️ 运行逻辑
-
-    ### 🚫 关闭条件 (需同时满足)
-    *   太阳方位角在设定范围内 (直射窗口)。
-    *   太阳高度角高于设定值 (排除清晨/傍晚弱光)。
-    *   光照传感器数值 > 阈值。
-    *   天气非下雨。
-
-    ### ✅ 打开条件
-    *   **基础条件**：上述“关闭条件”不再满足，且持续了设定的等待时间（防止云层飘过反复开关）。
-    *   **隐私条件**：如果配置了人体传感器，需额外满足“**室内无人**”且持续设定时间。
-
-    ## 🛠️ 参数指南
-    *   **窗户方位角**：北=0, 东=90, 南=180, 西=270。例如窗户朝南偏西，约 200°。
-    *   **方位角范围**：如果设为 80，则覆盖范围是 [方位角-80] 到 [方位角+80]。
-    *   **天气实体**：建议使用本地集成 (如 HomeKit Controller 接入的 HomePod 天气) 或和风天气，以保证实时性。
+    说明：
+    - 朝南窗户夏天容易出现“太阳高度角很高，但室内没有直射”的情况。
+    - 因此增加了太阳高度角上限，避免夏季南窗误关。
+    - 南向窗建议：
+      window_azimuth: 189
+      azimuth_range: 55
+      min_elevation_winter: 3
+      min_elevation_summer: 25
+      max_elevation_winter: 90
+      max_elevation_summer: 55
+      lux_threshold: 4000
+      no_sun_duration: 10
+      no_presence_duration: 30
 
   domain: automation
+
   input:
-    # --- 核心控制对象 ---
     target_curtains:
       name: 目标窗帘
-      description: 本次自动化要控制的窗帘。
       selector:
         target:
           entity:
             domain: cover
 
     presence_sensor:
-      name: 人体存在传感器 (可选)
-      description: >
-        【不选】：阳光消失即开窗帘（适合客厅）。
-        【选择】：阳光消失且确认无人后才开窗帘（适合卧室）。
-      default: []
+      name: 人体存在传感器（可选）
+      default: ""
       selector:
         entity:
           domain: binary_sensor
 
-    # --- 传感器输入 ---
     lux_sensor:
-      name: 光照传感器 (Lux)
-      description: 选择客厅或阳台的光照传感器。
+      name: 光照传感器（Lux）
+      description: 务必准确反映窗边亮度。
       selector:
         entity:
           domain: sensor
@@ -62,16 +57,14 @@ blueprint:
 
     weather_entity:
       name: 天气实体
-      description: 用于判断是否下雨
       selector:
         entity:
           domain: weather
 
-    # --- 算法参数 ---
     window_azimuth:
       name: 窗户方位角
-      description: 窗户正对的方向 (0=北, 90=东, 180=南, 270=西)。
-      default: 194
+      description: 北=0，东=90，南=180，西=270。
+      default: 180
       selector:
         number:
           min: 0
@@ -79,19 +72,49 @@ blueprint:
           mode: box
 
     azimuth_range:
-      name: 方位角范围 (+/-)
-      description: 阳光直射的角度宽度。
-      default: 80
+      name: 方位角范围（+/-）
+      description: 南窗建议 50-70；西窗可适当大一点。
+      default: 60
+      selector:
+        number:
+          min: 0
+          max: 120
+          mode: box
+
+    min_elevation_winter:
+      name: 冬至最低高度角（12月22日）
+      description: 一年中太阳最低时使用的最低高度角阈值。
+      default: 3
       selector:
         number:
           min: 0
           max: 90
-          mode: box
+          mode: slider
 
-    min_elevation:
-      name: 最小太阳高度角
-      description: 太阳高度低于此角度时不触发。
-      default: 20
+    min_elevation_summer:
+      name: 夏至最低高度角（6月21日）
+      description: 一年中太阳最高时使用的最低高度角阈值。
+      default: 25
+      selector:
+        number:
+          min: 0
+          max: 90
+          mode: slider
+
+    max_elevation_winter:
+      name: 冬季最高高度角
+      description: 冬天太阳较低，通常可以设高一些，例如 90。
+      default: 90
+      selector:
+        number:
+          min: 0
+          max: 90
+          mode: slider
+
+    max_elevation_summer:
+      name: 夏季最高高度角
+      description: 夏天太阳太高时，朝南窗通常不会有直射，可设为 50-60。
+      default: 55
       selector:
         number:
           min: 0
@@ -100,17 +123,24 @@ blueprint:
 
     lux_threshold:
       name: 光照触发阈值
-      description: 高于此 Lux 值才认为是强光。
-      default: 13000
+      description: 未配置动态阈值助手或助手状态无效时使用。
+      default: 4000
       selector:
         number:
           min: 0
           max: 100000
           mode: box
 
-    # --- 时间设置 ---
+    lux_threshold_helper:
+      name: 自动学习照度阈值助手（可选）
+      description: 配置后优先读取该 input_number；无效时回退到固定光照触发阈值。
+      default: ""
+      selector:
+        entity:
+          domain: input_number
+
     no_sun_duration:
-      name: 无阳光等待时间 (分钟)
+      name: 无阳光等待时间（分钟）
       default: 10
       selector:
         number:
@@ -119,7 +149,7 @@ blueprint:
           unit_of_measurement: minutes
 
     no_presence_duration:
-      name: 无人等待时间 (分钟)
+      name: 无人等待时间（分钟）
       default: 30
       selector:
         number:
@@ -128,8 +158,8 @@ blueprint:
           unit_of_measurement: minutes
 
     automation_switch:
-      name: 自动化总开关 (可选)
-      default: []
+      name: 自动化总开关（可选）
+      default: ""
       selector:
         entity:
           domain: input_boolean
@@ -142,38 +172,128 @@ trigger_variables:
   weather_entity_id: !input weather_entity
   win_az: !input window_azimuth
   az_range: !input azimuth_range
-  min_ele: !input min_elevation
+  limit_winter: !input min_elevation_winter
+  limit_summer: !input min_elevation_summer
+  max_limit_winter: !input max_elevation_winter
+  max_limit_summer: !input max_elevation_summer
   lux_limit: !input lux_threshold
+  lux_threshold_helper_entity: !input lux_threshold_helper
+  presence_entity: !input presence_sensor
+
+variables:
+  lux_sensor_entity: !input lux_sensor
+  weather_entity_id: !input weather_entity
+  win_az: !input window_azimuth
+  az_range: !input azimuth_range
+  limit_winter: !input min_elevation_winter
+  limit_summer: !input min_elevation_summer
+  max_limit_winter: !input max_elevation_winter
+  max_limit_summer: !input max_elevation_summer
+  lux_limit: !input lux_threshold
+  lux_threshold_helper_entity: !input lux_threshold_helper
+  effective_lux_limit: >
+    {% set helper_raw = states(lux_threshold_helper_entity) if lux_threshold_helper_entity not in [none, '', []] else '' %}
+    {% set helper_lux = helper_raw | float(0) %}
+    {{ helper_lux if helper_raw not in ['unknown', 'unavailable', 'none', ''] and is_number(helper_raw) and 1000 <= helper_lux <= 50000 else (lux_limit | float(0)) }}
+  lux_limit_source: >
+    {% set helper_raw = states(lux_threshold_helper_entity) if lux_threshold_helper_entity not in [none, '', []] else '' %}
+    {% set helper_lux = helper_raw | float(0) %}
+    {{ 'helper' if helper_raw not in ['unknown', 'unavailable', 'none', ''] and is_number(helper_raw) and 1000 <= helper_lux <= 50000 else 'fixed_fallback' }}
   presence_entity: !input presence_sensor
   no_presence_mins: !input no_presence_duration
   auto_switch_entity: !input automation_switch
 
 trigger:
-  # 触发1：阳光直射
   - platform: template
-    id: "sun_arrived"
+    id: sun_arrived
     value_template: >
-      {% set az = state_attr('sun.sun', 'azimuth') | float(0) %}
-      {% set el = state_attr('sun.sun', 'elevation') | float(0) %}
-      {% set lux = states(lux_sensor_entity) | float(0) %}
-      {% set is_rainy = is_state(weather_entity_id, 'rainy') %}
-      {{ (az > (win_az - az_range)) and (az < (win_az + az_range)) and (el > min_ele) and (not is_rainy) and (lux > lux_limit) }}
+      {% set day = now().strftime('%j') | int %}
+      {% set rad = (day + 10) * 2 * 3.1415926 / 365 %}
+      {% set factor = (1 - cos(rad)) / 2 %}
 
-  # 触发2：阳光消失 (持续 X 分钟)
-  - platform: template
-    id: "sun_gone_wait"
-    value_template: >
+      {% set winter = limit_winter | float(0) %}
+      {% set summer = limit_summer | float(0) %}
+      {% set dynamic_min = winter + (summer - winter) * factor %}
+
+      {% set max_winter = max_limit_winter | float(90) %}
+      {% set max_summer = max_limit_summer | float(55) %}
+      {% set dynamic_max = max_winter + (max_summer - max_winter) * factor %}
+
       {% set az = state_attr('sun.sun', 'azimuth') | float(0) %}
       {% set el = state_attr('sun.sun', 'elevation') | float(0) %}
-      {% set lux = states(lux_sensor_entity) | float(0) %}
-      {% set is_rainy = is_state(weather_entity_id, 'rainy') %}
-      {{ not ( (az > (win_az - az_range)) and (az < (win_az + az_range)) and (el > min_ele) and (not is_rainy) and (lux > lux_limit) ) }}
+      {% set az_diff = ((az - (win_az | float(0)) + 540) % 360) - 180 %}
+      {% set sun_hits_window = (az_diff | abs) <= (az_range | float(0)) %}
+
+      {% set lux_raw = states(lux_sensor_entity) %}
+      {% set lux_valid = lux_raw not in ['unknown', 'unavailable', 'none', ''] %}
+      {% set lux = lux_raw | float(0) %}
+      {% set helper_raw = states(lux_threshold_helper_entity) if lux_threshold_helper_entity not in [none, '', []] else '' %}
+      {% set helper_lux = helper_raw | float(0) %}
+      {% set helper_valid = helper_raw not in ['unknown', 'unavailable', 'none', ''] and is_number(helper_raw) and 1000 <= helper_lux <= 50000 %}
+      {% set effective_lux_limit = helper_lux if helper_valid else (lux_limit | float(0)) %}
+
+      {% set weather_state = states(weather_entity_id) %}
+      {% set weather_valid = weather_state not in ['unknown', 'unavailable', 'none', ''] %}
+      {% set is_rainy = weather_state in ['rainy', 'pouring', 'lightning-rainy', 'hail', 'snowy-rainy'] %}
+
+      {{
+        lux_valid
+        and weather_valid
+        and sun_hits_window
+        and el > dynamic_min
+        and el < dynamic_max
+        and lux > effective_lux_limit
+        and not is_rainy
+      }}
+
+  - platform: template
+    id: sun_gone_wait
+    value_template: >
+      {% set day = now().strftime('%j') | int %}
+      {% set rad = (day + 10) * 2 * 3.1415926 / 365 %}
+      {% set factor = (1 - cos(rad)) / 2 %}
+
+      {% set winter = limit_winter | float(0) %}
+      {% set summer = limit_summer | float(0) %}
+      {% set dynamic_min = winter + (summer - winter) * factor %}
+
+      {% set max_winter = max_limit_winter | float(90) %}
+      {% set max_summer = max_limit_summer | float(55) %}
+      {% set dynamic_max = max_winter + (max_summer - max_winter) * factor %}
+
+      {% set az = state_attr('sun.sun', 'azimuth') | float(0) %}
+      {% set el = state_attr('sun.sun', 'elevation') | float(0) %}
+      {% set az_diff = ((az - (win_az | float(0)) + 540) % 360) - 180 %}
+      {% set sun_hits_window = (az_diff | abs) <= (az_range | float(0)) %}
+
+      {% set lux_raw = states(lux_sensor_entity) %}
+      {% set lux_valid = lux_raw not in ['unknown', 'unavailable', 'none', ''] %}
+      {% set lux = lux_raw | float(0) %}
+      {% set helper_raw = states(lux_threshold_helper_entity) if lux_threshold_helper_entity not in [none, '', []] else '' %}
+      {% set helper_lux = helper_raw | float(0) %}
+      {% set helper_valid = helper_raw not in ['unknown', 'unavailable', 'none', ''] and is_number(helper_raw) and 1000 <= helper_lux <= 50000 %}
+      {% set effective_lux_limit = helper_lux if helper_valid else (lux_limit | float(0)) %}
+
+      {% set weather_state = states(weather_entity_id) %}
+      {% set weather_valid = weather_state not in ['unknown', 'unavailable', 'none', ''] %}
+      {% set is_rainy = weather_state in ['rainy', 'pouring', 'lightning-rainy', 'hail', 'snowy-rainy'] %}
+
+      {% set close_condition =
+        lux_valid
+        and weather_valid
+        and sun_hits_window
+        and el > dynamic_min
+        and el < dynamic_max
+        and lux > effective_lux_limit
+        and not is_rainy
+      %}
+
+      {{ lux_valid and lux < effective_lux_limit and not close_condition }}
     for:
       minutes: !input no_sun_duration
 
-  # 触发3：无人 (持续 X 分钟)
   - platform: template
-    id: "person_gone_wait"
+    id: person_gone_wait
     value_template: >
       {% if presence_entity in [none, '', []] %}
         false
@@ -185,64 +305,82 @@ trigger:
 
 condition:
   - condition: sun
-    before: sunset
     after: sunrise
+    before: sunset
 
   - condition: template
     value_template: >
-      {# 如果 auto_switch_entity 不是空列表(即用户选了实体)，则检查是否为 on #}
-      {% if auto_switch_entity not in [none, [], ''] %}
-        {{ is_state(auto_switch_entity, 'on') }}
-      {% else %}
+      {% if auto_switch_entity in [none, '', []] %}
         true
+      {% else %}
+        {{ is_state(auto_switch_entity, 'on') }}
       {% endif %}
 
 action:
   - choose:
-      # --- 场景一：阳光直射 -> 关 ---
       - conditions:
           - condition: trigger
-            id: "sun_arrived"
+            id: sun_arrived
         sequence:
           - action: cover.close_cover
             target: !input target_curtains
 
-    # --- 场景二：尝试打开 (默认) ---
     default:
-      - sequence:
-          # 1. 基础门槛
-          - condition: or
-            conditions:
-              - condition: trigger
-                id: "sun_gone_wait"
-              - condition: trigger
-                id: "person_gone_wait"
+      - condition: template
+        value_template: >
+          {% set day = now().strftime('%j') | int %}
+          {% set rad = (day + 10) * 2 * 3.1415926 / 365 %}
+          {% set factor = (1 - cos(rad)) / 2 %}
 
-          # 2. 核心检查：阳光必须确实没了
-          - condition: template
-            value_template: >
-              {% set az = state_attr('sun.sun', 'azimuth') | float(0) %}
-              {% set el = state_attr('sun.sun', 'elevation') | float(0) %}
-              {% set lux = states(lux_sensor_entity) | float(0) %}
-              {% set is_rainy = is_state(weather_entity_id, 'rainy') %}
-              {{ not ( (az > (win_az - az_range)) and (az < (win_az + az_range)) and (el > min_ele) and (not is_rainy) and (lux > lux_limit) ) }}
+          {% set winter = limit_winter | float(0) %}
+          {% set summer = limit_summer | float(0) %}
+          {% set dynamic_min = winter + (summer - winter) * factor %}
 
-          # 3. 智能检查：如果有传感器，必须确认无人
-          - condition: template
-            value_template: >
-              {% if presence_entity in [none, [], ''] %}
-                true
-              {% else %}
-                {% if is_state(presence_entity, 'off') %}
-                  {% set last_changed = states[presence_entity].last_changed %}
-                  {% set duration_sec = no_presence_mins * 60 %}
-                  {% set time_diff = as_timestamp(now()) - as_timestamp(last_changed) %}
-                  {{ time_diff >= duration_sec }}
-                {% else %}
-                  false
-                {% endif %}
-              {% endif %}
+          {% set max_winter = max_limit_winter | float(90) %}
+          {% set max_summer = max_limit_summer | float(55) %}
+          {% set dynamic_max = max_winter + (max_summer - max_winter) * factor %}
 
-          # 4. 执行打开
-          - action: cover.open_cover
-            target: !input target_curtains
+          {% set az = state_attr('sun.sun', 'azimuth') | float(0) %}
+          {% set el = state_attr('sun.sun', 'elevation') | float(0) %}
+          {% set az_diff = ((az - (win_az | float(0)) + 540) % 360) - 180 %}
+          {% set sun_hits_window = (az_diff | abs) <= (az_range | float(0)) %}
+
+          {% set lux_raw = states(lux_sensor_entity) %}
+          {% set lux_valid = lux_raw not in ['unknown', 'unavailable', 'none', ''] %}
+          {% set lux = lux_raw | float(0) %}
+          {% set helper_raw = states(lux_threshold_helper_entity) if lux_threshold_helper_entity not in [none, '', []] else '' %}
+          {% set helper_lux = helper_raw | float(0) %}
+          {% set helper_valid = helper_raw not in ['unknown', 'unavailable', 'none', ''] and is_number(helper_raw) and 1000 <= helper_lux <= 50000 %}
+          {% set effective_lux_limit = helper_lux if helper_valid else (lux_limit | float(0)) %}
+
+          {% set weather_state = states(weather_entity_id) %}
+          {% set weather_valid = weather_state not in ['unknown', 'unavailable', 'none', ''] %}
+          {% set is_rainy = weather_state in ['rainy', 'pouring', 'lightning-rainy', 'hail', 'snowy-rainy'] %}
+
+          {% set close_condition =
+            lux_valid
+            and weather_valid
+            and sun_hits_window
+            and el > dynamic_min
+            and el < dynamic_max
+            and lux > effective_lux_limit
+            and not is_rainy
+          %}
+
+          {{ lux_valid and lux < effective_lux_limit and not close_condition }}
+
+      - condition: template
+        value_template: >
+          {% if presence_entity in [none, '', []] %}
+            true
+          {% elif is_state(presence_entity, 'off') %}
+            {% set last_changed = states[presence_entity].last_changed %}
+            {% set duration_sec = (no_presence_mins | float(0)) * 60 %}
+            {% set time_diff = as_timestamp(now()) - as_timestamp(last_changed) %}
+            {{ time_diff >= duration_sec }}
+          {% else %}
+            false
+          {% endif %}
+
+      - action: cover.open_cover
+        target: !input target_curtains
