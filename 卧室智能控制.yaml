@@ -128,12 +128,13 @@ blueprint:
     # 分组 3: 夜灯逻辑
     # ==========================
     section_night:
-      name: 夜灯模式 (门磁触发)
-      description: 仅在睡眠模式下有效，需配合门磁
+      name: 夜灯模式 (确认进房)
+      description: 仅在睡眠模式和夜间窗口内有效，需配合门口红外与室内人体连续触发
       icon: mdi:weather-night
       input:
         inp_door:
-          name: 卧室门磁 (可选)
+          name: 卧室门磁 (兼容保留)
+          description: 仅作辅助输入，门磁变化不会单独触发灯光
           default: []
           selector:
             entity:
@@ -157,6 +158,20 @@ blueprint:
               min: 1
               max: 60
               mode: slider
+
+        inp_night_start_time:
+          name: 夜灯开始时间
+          description: 夜灯分支只在该时间之后生效
+          default: "21:00:00"
+          selector:
+            time: {}
+
+        inp_night_end_time:
+          name: 夜灯结束时间
+          description: 夜灯分支到该时间停止，支持跨午夜
+          default: "07:00:00"
+          selector:
+            time: {}
 
         inp_night_lights:
           name: 夜灯目标
@@ -287,13 +302,19 @@ action:
       v_lux_limit: !input inp_lux_threshold
       v_sunset_enable: !input inp_enable_sunset
       v_timeout: !input inp_entry_timeout
+      night_start_text: !input inp_night_start_time
+      night_end_text: !input inp_night_end_time
+
+      # 床铺或套房有人：即使主卧人体误报 off，也不能视为空房
+      occupied_without_main: >
+        {% set bed_pressure = expand(v_beds) | selectattr('state','eq','on') | list | count > 0 %}
+        {% set suite_area = expand(v_suite) | selectattr('state','eq','on') | list | count > 0 %}
+        {{ bed_pressure or suite_area }}
 
       # 逻辑计算：是否有人
       is_occupied: >
         {% set main = is_state(v_bed_sensor, 'on') %}
-        {% set bed_pressure = expand(v_beds) | selectattr('state','eq','on') | list | count > 0 %}
-        {% set suite_area = expand(v_suite) | selectattr('state','eq','on') | list | count > 0 %}
-        {{ main or bed_pressure or suite_area }}
+        {{ main or occupied_without_main }}
 
       # 逻辑计算：是否睡眠中
       is_sleeping: >
@@ -318,6 +339,19 @@ action:
           {{ recent.found }}
         {% endif %}
 
+      # 夜灯只在配置的夜间窗口内生效，开始时间晚于结束时间时跨午夜
+      is_night_window: >
+        {% set current_text = now().strftime('%H:%M:%S') %}
+        {% set start_text = night_start_text | string %}
+        {% set end_text = night_end_text | string %}
+        {% if start_text < end_text %}
+          {{ start_text <= current_text < end_text }}
+        {% elif start_text > end_text %}
+          {{ current_text >= start_text or current_text < end_text }}
+        {% else %}
+          false
+        {% endif %}
+
   - choose:
       # --------------------------------------------------
       # 场景 1: 正常进房开灯
@@ -327,6 +361,10 @@ action:
             id: t_enter
           - condition: template
             value_template: "{{ not is_sleeping }}"
+          - condition: template
+            value_template: "{{ not occupied_without_main }}"
+          - condition: template
+            value_template: "{{ valid_entry_motion }}"
           - condition: template
             value_template: "{{ not lights_on }}"
           # 光照条件
@@ -358,11 +396,11 @@ action:
       # --------------------------------------------------
       - conditions:
           - condition: trigger
-            id: t_door
+            id: t_enter
           - condition: template
             value_template: "{{ is_sleeping }}"
           - condition: template
-            value_template: "{{ is_occupied }}"
+            value_template: "{{ is_night_window }}"
           - condition: template
             value_template: "{{ valid_entry_motion }}"
         sequence:
