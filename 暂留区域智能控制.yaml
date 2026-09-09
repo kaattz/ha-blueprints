@@ -23,41 +23,54 @@ blueprint:
           selector:
             entity:
               filter:
-              - domain: binary_sensor
+              - domain:
+                - binary_sensor
                 device_class:
                 - motion
                 - occupancy
                 - presence
+              reorder: false
+              multiple: false
         secondary_presence_sensor:
           name: 副/触发传感器列表 (可选)
-          description: |
-            **支持多选**。
+          description: '**支持多选**。
+
             选择所有通往公区的传感器（如主卧门口、次卧门口、入户门）。
+
             当这些位置**任意一个**有人时，都会触发开灯（主要用于夜间预亮）。
+
+            '
           default: []
           selector:
             entity:
               multiple: true
               filter:
-              - domain: binary_sensor
+              - domain:
+                - binary_sensor
                 device_class:
                 - motion
                 - occupancy
                 - presence
+              reorder: false
         illuminance_sensor:
           name: 光照传感器
           selector:
             entity:
               filter:
-              - domain: sensor
-                device_class: illuminance
+              - domain:
+                - sensor
+                device_class:
+                - illuminance
+              reorder: false
+              multiple: false
         light_target:
           name: ☀️ 日常主灯
           description: 白天/傍晚自动开启的灯具。
           selector:
             target:
               entity:
-                domain: light
+              - domain:
+                - light
     section_day_mode:
       name: 日常模式设置
       description: 非夜间时段的参数。
@@ -73,6 +86,7 @@ blueprint:
               max: 500
               mode: slider
               unit_of_measurement: lx
+              step: 1
         enable_sunset:
           name: 启用日落判断
           default: false
@@ -80,14 +94,17 @@ blueprint:
             boolean: {}
         interfering_lights:
           name: 🚫 光照干扰源 (防误判)
-          description: |
-            选择邻近区域的灯。当这些灯亮着时，忽略光照阈值强制开灯。
+          description: '选择邻近区域的灯。当这些灯亮着时，忽略光照阈值强制开灯。
+
+            '
           default: []
           selector:
             entity:
               multiple: true
               filter:
-              - domain: light
+              - domain:
+                - light
+              reorder: false
         brightness_setting:
           name: 日常亮度 (%)
           default: 80
@@ -96,6 +113,7 @@ blueprint:
               min: 1
               max: 100
               mode: slider
+              step: 1
         color_temp_setting:
           name: 日常色温 (K)
           default: 3000
@@ -126,14 +144,17 @@ blueprint:
             time: {}
         night_light_target:
           name: 夜间专用灯
-          description: |
-            **关键设置：** 起夜时开启的灯（如灯带、落地灯）。
+          description: '**关键设置：** 起夜时开启的灯（如灯带、落地灯）。
+
             若留空，夜间将继续使用“日常主灯”，但应用下方的亮度/色温。
+
+            '
           default: {}
           selector:
             target:
               entity:
-                domain: light
+              - domain:
+                - light
         night_brightness:
           name: 夜间亮度 (%)
           description: 建议设置较低亮度，避免刺眼。
@@ -143,6 +164,7 @@ blueprint:
               min: 1
               max: 100
               mode: slider
+              step: 1
         night_kelvin:
           name: 夜间色温 (K)
           description: 建议设置暖色温（如 3000K）。
@@ -166,16 +188,20 @@ blueprint:
           default:
             seconds: 60
           selector:
-            duration: {}
+            duration:
+              enable_second: true
         light_target_off:
           name: 关灯目标 (可选)
-          description: |
-            若留空，默认关闭 **日常主灯 + 夜间专用灯**。
+          description: '若留空，默认关闭 **日常主灯 + 夜间专用灯**。
+
             若选择，则只关闭选中的设备。
+
+            '
           selector:
             target:
               entity:
-                domain: light
+              - domain:
+                - light
           default: ''
         shutdown_entities:
           name: 🔌 随动关闭设备 (可选)
@@ -184,7 +210,7 @@ blueprint:
           selector:
             target:
               entity:
-                domain:
+              - domain:
                 - switch
                 - media_player
                 - light
@@ -198,25 +224,31 @@ blueprint:
             entity:
               multiple: true
               filter:
-              - domain: binary_sensor
+              - domain:
+                - binary_sensor
                 device_class:
                 - motion
                 - occupancy
                 - presence
+              reorder: false
         hvac_target:
           name: 空调设备
           default: ''
           selector:
             entity:
               filter:
-              - domain: climate
+              - domain:
+                - climate
+              reorder: false
+              multiple: false
         hvac_off_delay:
           name: ⏳ 关空调延时 (长)
           description: 区域无人多久后关空调（建议 20-30 分钟）。
           default:
             minutes: 20
           selector:
-            duration: {}
+            duration:
+              enable_second: true
         hvac_area_presence_entities:
           name: 🔗 空调保持区域 (关联传感器)
           description: 若这些区域有人，【不关空调】。
@@ -225,11 +257,13 @@ blueprint:
             entity:
               multiple: true
               filter:
-              - domain: binary_sensor
+              - domain:
+                - binary_sensor
                 device_class:
                 - motion
                 - occupancy
                 - presence
+              reorder: false
     section_global:
       name: 屏蔽与例外
       description: 防止自动运行的条件。
@@ -244,7 +278,9 @@ blueprint:
             entity:
               multiple: true
               filter:
-              - domain: light
+              - domain:
+                - light
+              reorder: false
         night_mode_entities:
           name: 全局睡眠/免打扰模式
           description: 任意实体为 ON 时，暂停整个自动化（不开也不关）。
@@ -252,7 +288,9 @@ blueprint:
             entity:
               multiple: true
               filter:
-              - domain: input_boolean
+              - domain:
+                - input_boolean
+              reorder: false
   source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E6%9A%82%E7%95%99%E5%8C%BA%E5%9F%9F%E6%99%BA%E8%83%BD%E6%8E%A7%E5%88%B6.yaml
 triggers:
 - trigger: state

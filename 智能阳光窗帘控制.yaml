@@ -38,30 +38,37 @@ blueprint:
       selector:
         target:
           entity:
-            domain: cover
-
+          - domain:
+            - cover
     presence_sensor:
       name: 人体存在传感器（可选）
-      default: ""
+      default: ''
       selector:
         entity:
-          domain: binary_sensor
-
+          domain:
+          - binary_sensor
+          reorder: false
+          multiple: false
     lux_sensor:
       name: 光照传感器（Lux）
       description: 务必准确反映窗边亮度。
       selector:
         entity:
-          domain: sensor
-          device_class: illuminance
-
+          domain:
+          - sensor
+          device_class:
+          - illuminance
+          reorder: false
+          multiple: false
     weather_entity:
       name: 天气实体
       description: 仅保留用于诊断，不参与关帘判定。
       selector:
         entity:
-          domain: weather
-
+          domain:
+          - weather
+          reorder: false
+          multiple: false
     window_azimuth:
       name: 窗户方位角
       description: 北=0，东=90，南=180，西=270。
@@ -71,7 +78,7 @@ blueprint:
           min: 0
           max: 360
           mode: box
-
+          step: 1
     azimuth_range:
       name: 方位角范围（+/-）
       description: 南窗建议 50-70；西窗可适当大一点。
@@ -81,7 +88,7 @@ blueprint:
           min: 0
           max: 120
           mode: box
-
+          step: 1
     min_elevation_winter:
       name: 冬至最低高度角（12月22日）
       description: 一年中太阳最低时使用的最低高度角阈值。
@@ -91,7 +98,7 @@ blueprint:
           min: 0
           max: 90
           mode: slider
-
+          step: 1
     min_elevation_summer:
       name: 夏至最低高度角（6月21日）
       description: 一年中太阳最高时使用的最低高度角阈值。
@@ -101,7 +108,7 @@ blueprint:
           min: 0
           max: 90
           mode: slider
-
+          step: 1
     max_elevation_winter:
       name: 冬季最高高度角
       description: 冬天太阳较低，通常可以设高一些，例如 90。
@@ -111,7 +118,7 @@ blueprint:
           min: 0
           max: 90
           mode: slider
-
+          step: 1
     max_elevation_summer:
       name: 夏季最高高度角
       description: 夏天太阳太高时，朝南窗通常不会有直射，可设为 50-60。
@@ -121,7 +128,7 @@ blueprint:
           min: 0
           max: 90
           mode: slider
-
+          step: 1
     lux_threshold:
       name: 光照触发阈值
       description: 未配置动态阈值助手或助手状态无效时使用。
@@ -131,15 +138,17 @@ blueprint:
           min: 0
           max: 100000
           mode: box
-
+          step: 1
     lux_threshold_helper:
       name: 自动学习照度阈值助手（可选）
       description: 配置后优先读取该 input_number；无效时回退到固定光照触发阈值。
-      default: ""
+      default: ''
       selector:
         entity:
-          domain: input_number
-
+          domain:
+          - input_number
+          reorder: false
+          multiple: false
     no_sun_duration:
       name: 无阳光等待时间（分钟）
       default: 10
@@ -148,7 +157,8 @@ blueprint:
           min: 0
           max: 120
           unit_of_measurement: minutes
-
+          step: 1
+          mode: slider
     no_presence_duration:
       name: 无人等待时间（分钟）
       default: 30
@@ -157,14 +167,17 @@ blueprint:
           min: 0
           max: 120
           unit_of_measurement: minutes
-
+          step: 1
+          mode: slider
     automation_switch:
       name: 自动化总开关（可选）
-      default: ""
+      default: ''
       selector:
         entity:
-          domain: input_boolean
-
+          domain:
+          - input_boolean
+          reorder: false
+          multiple: false
 mode: restart
 max_exceeded: silent
 

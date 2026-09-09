@@ -12,9 +12,6 @@ blueprint:
   domain: automation
   source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E5%8D%A7%E5%AE%A4%E6%99%BA%E8%83%BD%E6%8E%A7%E5%88%B6.yaml
   input:
-    # ==========================
-    # 分组 1: 核心传感器与模式
-    # ==========================
     section_sensors:
       name: 核心传感器与模式
       description: 设置人体感应、床压力以及睡眠模式
@@ -24,12 +21,14 @@ blueprint:
           name: 主卧室人体传感器 (必选)
           selector:
             entity:
-              domain: binary_sensor
+              domain:
+              - binary_sensor
               device_class:
-                - motion
-                - occupancy
-                - presence
-
+              - motion
+              - occupancy
+              - presence
+              reorder: false
+              multiple: false
         inp_beds:
           name: 床铺压力/存在传感器 (可选)
           description: 只要其中一个为ON，就不会关灯
@@ -37,8 +36,9 @@ blueprint:
           selector:
             entity:
               multiple: true
-              domain: binary_sensor
-
+              domain:
+              - binary_sensor
+              reorder: false
         inp_suite_presence:
           name: 套房其他传感器 (可选)
           description: 如卫生间、衣帽间，只要为ON，就不会关灯
@@ -46,8 +46,9 @@ blueprint:
           selector:
             entity:
               multiple: true
-              domain: binary_sensor
-
+              domain:
+              - binary_sensor
+              reorder: false
         inp_sleep_modes:
           name: 睡眠模式 (可选)
           description: 任意一个为ON时，视为睡眠中
@@ -55,11 +56,9 @@ blueprint:
           selector:
             entity:
               multiple: true
-              domain: input_boolean
-
-    # ==========================
-    # 分组 2: 进房灯光设置
-    # ==========================
+              domain:
+              - input_boolean
+              reorder: false
     section_entry:
       name: 进房灯光设置
       description: 正常状态下进门的开灯设置
@@ -70,8 +69,8 @@ blueprint:
           selector:
             target:
               entity:
-                domain: light
-
+              - domain:
+                - light
         inp_entry_brightness:
           name: 开启亮度 (%)
           default: 50
@@ -80,7 +79,7 @@ blueprint:
               min: 1
               max: 100
               mode: slider
-
+              step: 1
         inp_entry_kelvin:
           name: 开启色温 (K)
           default: 3000
@@ -90,7 +89,6 @@ blueprint:
               max: 6500
               step: 100
               mode: slider
-
         inp_any_light_on:
           name: 已有灯亮检测 (可选)
           description: 若此实体为ON，进门不执行动作
@@ -98,17 +96,20 @@ blueprint:
           selector:
             entity:
               multiple: true
-              domain: binary_sensor
-
+              domain:
+              - binary_sensor
+              reorder: false
         inp_lux:
           name: 光照传感器 (可选)
           default: []
           selector:
             entity:
-              domain: sensor
-              device_class: illuminance
+              domain:
+              - sensor
+              device_class:
+              - illuminance
               multiple: true
-
+              reorder: false
         inp_lux_threshold:
           name: 光照阈值 (lx)
           default: 20
@@ -117,16 +118,12 @@ blueprint:
               min: 0
               max: 1000
               mode: box
-
+              step: 1
         inp_enable_sunset:
           name: 日落后强制开灯
           default: false
           selector:
             boolean: {}
-
-    # ==========================
-    # 分组 3: 夜灯逻辑
-    # ==========================
     section_night:
       name: 夜灯模式 (确认进房)
       description: 仅在睡眠模式和夜间窗口内有效，需配合门口红外与室内人体连续触发
@@ -138,18 +135,21 @@ blueprint:
           default: []
           selector:
             entity:
-              domain: binary_sensor
-              device_class: door
+              domain:
+              - binary_sensor
+              device_class:
+              - door
               multiple: true
-
+              reorder: false
         inp_entrance_motion:
           name: 门外人体传感器 (可选)
           default: []
           selector:
             entity:
-              domain: binary_sensor
+              domain:
+              - binary_sensor
               multiple: true
-
+              reorder: false
         inp_entry_timeout:
           name: 进门判定时间 (秒)
           default: 10
@@ -158,29 +158,27 @@ blueprint:
               min: 1
               max: 60
               mode: slider
-
+              step: 1
         inp_night_start_time:
           name: 夜灯开始时间
           description: 夜灯分支只在该时间之后生效
-          default: "21:00:00"
+          default: '21:00:00'
           selector:
             time: {}
-
         inp_night_end_time:
           name: 夜灯结束时间
           description: 夜灯分支到该时间停止，支持跨午夜
-          default: "07:00:00"
+          default: 07:00:00
           selector:
             time: {}
-
         inp_night_lights:
           name: 夜灯目标
           default: {}
           selector:
             target:
               entity:
-                domain: light
-
+              - domain:
+                - light
         inp_night_brightness:
           name: 夜灯亮度 (%)
           default: 2
@@ -189,7 +187,7 @@ blueprint:
               min: 1
               max: 100
               mode: slider
-
+              step: 1
         inp_night_kelvin:
           name: 夜灯色温 (K)
           default: 3000
@@ -198,10 +196,7 @@ blueprint:
               min: 2000
               max: 6500
               mode: slider
-
-    # ==========================
-    # 分组 4: 离房关断逻辑
-    # ==========================
+              step: 1
     section_off:
       name: 离房关断逻辑
       description: 无人时的关闭设置
@@ -212,41 +207,41 @@ blueprint:
           selector:
             target:
               entity:
-                domain: light
-
+              - domain:
+                - light
         inp_shutdown_devices:
           name: 无人时关闭的其他设备
           default: {}
           selector:
             target:
               entity:
-                domain:
-                  - media_player
-                  - switch
-                  - fan
-
+              - domain:
+                - media_player
+                - switch
+                - fan
         inp_light_off_delay:
           name: 关灯延时
           default:
             minutes: 20
           selector:
-            duration: {}
-
+            duration:
+              enable_second: true
         inp_ac:
           name: 空调设备 (可选)
           default: []
           selector:
             entity:
-              domain: climate
+              domain:
+              - climate
               multiple: true
-
+              reorder: false
         inp_ac_delay:
           name: 关空调延时
           default:
             minutes: 60
           selector:
-            duration: {}
-
+            duration:
+              enable_second: true
 # ========================================================
 # 触发器
 # ========================================================
