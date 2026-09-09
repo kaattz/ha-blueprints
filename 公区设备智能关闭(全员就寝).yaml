@@ -4,6 +4,7 @@ blueprint:
     通用逻辑：当检测到“所有在家的人”都“躺在床上”时，且公区无人，自动关闭设备。
     该蓝图适用于家庭成员较多的场景，支持最多4人配置。
     支持防抖动机制：当所有人在床后，等待一段时间（例如3分钟），如果期间有人下床，则取消关闭操作，避免误关。
+    若确认时间结束后公区仍有人，则继续等待公区恢复无人，但不超过下一个配置的截止时间。
 
   domain: automation
   source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E5%85%AC%E5%8C%BA%E8%AE%BE%E5%A4%87%E6%99%BA%E8%83%BD%E5%85%B3%E9%97%AD(%E5%85%A8%E5%91%98%E5%B0%B1%E5%AF%9D).yaml
@@ -38,6 +39,12 @@ blueprint:
                 - occupancy
                 - presence
               reorder: false
+        public_area_wait_deadline:
+          name: 公区等待截止时间
+          description: 全员就寝后，公区一直有人时最多等待到几点；到点取消本轮关闭。
+          default: "07:00:00"
+          selector:
+            time: {}
     section_person_1:
       name: 成员 1 配置
       icon: mdi:account
@@ -192,8 +199,42 @@ trigger:
       {{ ns.someone_home and ns.all_in_bed }}
     id: all_in_bed_true
 
+  # 等待公区无人期间有人下床时，利用 restart 模式立即取消旧执行。
+  - platform: template
+    value_template: >
+      {% set config = [
+        {'tracker': inputs.p1_tracker, 'bed': inputs.p1_bed_sensors},
+        {'tracker': inputs.p2_tracker, 'bed': inputs.p2_bed_sensors},
+        {'tracker': inputs.p3_tracker, 'bed': inputs.p3_bed_sensors},
+        {'tracker': inputs.p4_tracker, 'bed': inputs.p4_bed_sensors}
+      ] %}
+      {% set ns = namespace(all_in_bed=true, someone_home=false) %}
+      {% for item in config %}
+        {% if item.tracker != none and item.tracker != "" %}
+          {% if is_state(item.tracker, 'home') %}
+            {% set ns.someone_home = true %}
+            {% set active_bed = expand(item.bed) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+            {% if not active_bed %}
+              {% set ns.all_in_bed = false %}
+            {% endif %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+      {{ not (ns.someone_home and ns.all_in_bed) }}
+    id: all_in_bed_false
+
 action:
-  # 1. 触发后，先等待设定的延迟时间 (例如3分钟)
+  # 取消触发只负责打断旧执行，不进入关闭流程。
+  - condition: trigger
+    id: all_in_bed_true
+
+  # 将本轮截止时间固定为下一个配置时刻，避免跨午夜计算错误。
+  - variables:
+      shutdown_deadline_timestamp: >
+        {% set cutoff = today_at(inputs.public_area_wait_deadline) %}
+        {{ as_timestamp(cutoff if now() < cutoff else cutoff + timedelta(days=1)) }}
+
+  # 1. 全员上床后等待设定的确认时间（例如3分钟）。
   - delay: !input wait_time
 
   # 2. 等待结束后，再次检查“是否还在床上”
@@ -220,17 +261,70 @@ action:
       {% endfor %}
       {{ ns.someone_home and ns.all_in_bed }}
 
-  # 3. 再次检查公区是否有人 (双重保险)
+  # 3. 确认尚未到达本轮截止时间。
+  - condition: template
+    value_template: >
+      {{ as_timestamp(now()) < shutdown_deadline_timestamp | float(0) }}
+
+  # 4. 公区已无人则立即继续，否则等到无人或截止时间。
+  #    unknown、unavailable 和不存在的实体均不视为无人。
+  - wait_template: >
+      {% set sensors = inputs.public_area_sensors %}
+      {% if sensors in [none, [], ""] %}
+        true
+      {% else %}
+        {% set ns = namespace(all_clear=true) %}
+        {% for sensor in sensors %}
+          {% if not is_state(sensor, 'off') %}
+            {% set ns.all_clear = false %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.all_clear }}
+      {% endif %}
+    timeout: >
+      {{ [0, shutdown_deadline_timestamp | float(0) - as_timestamp(now())] | max }}
+    continue_on_timeout: false
+
+  # 5. 执行前再次确认仍是全员在床。
+  - condition: template
+    value_template: >
+      {% set config = [
+        {'tracker': inputs.p1_tracker, 'bed': inputs.p1_bed_sensors},
+        {'tracker': inputs.p2_tracker, 'bed': inputs.p2_bed_sensors},
+        {'tracker': inputs.p3_tracker, 'bed': inputs.p3_bed_sensors},
+        {'tracker': inputs.p4_tracker, 'bed': inputs.p4_bed_sensors}
+      ] %}
+      {% set ns = namespace(all_in_bed=true, someone_home=false) %}
+      {% for item in config %}
+        {% if item.tracker != none and item.tracker != "" %}
+          {% if is_state(item.tracker, 'home') %}
+            {% set ns.someone_home = true %}
+            {% set active_bed = expand(item.bed) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+            {% if not active_bed %}
+              {% set ns.all_in_bed = false %}
+            {% endif %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+      {{ ns.someone_home and ns.all_in_bed }}
+
+  # 6. 再次严格检查公区全部为 off。
   - condition: template
     value_template: >
       {% set sensors = inputs.public_area_sensors %}
       {% if sensors in [none, [], ""] %}
         true
       {% else %}
-        {{ expand(sensors) | selectattr('state', 'eq', 'on') | list | count == 0 }}
+        {% set ns = namespace(all_clear=true) %}
+        {% for sensor in sensors %}
+          {% if not is_state(sensor, 'off') %}
+            {% set ns.all_clear = false %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.all_clear }}
       {% endif %}
 
-  # 4. 执行关闭
+  # 7. 执行关闭
   - choose:
       - conditions: "{{ inputs.target_lights != [] }}"
         sequence:
@@ -250,6 +344,7 @@ action:
 trigger_variables:
   inputs:
     public_area_sensors: !input public_area_sensors
+    public_area_wait_deadline: !input public_area_wait_deadline
     target_lights: !input target_lights
     target_medias: !input target_medias
     target_climates: !input target_climates
