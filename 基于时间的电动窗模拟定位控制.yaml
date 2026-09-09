@@ -10,13 +10,19 @@ blueprint:
       description: 选择控制电机 开/关/暂停 的 Select 实体。
       selector:
         entity:
-          domain: select
+          domain:
+          - select
+          reorder: false
+          multiple: false
     position_sensor_entity:
       name: 位置传感器
       description: 仅在 0 (关) 和 100 (开) 更新状态的传感器。
       selector:
         entity:
-          domain: sensor
+          domain:
+          - sensor
+          reorder: false
+          multiple: false
     travel_time:
       name: 全程运行时间 (秒)
       description: 从完全关闭运行到完全打开所需的秒数 (请用秒表实测)。
@@ -26,7 +32,7 @@ blueprint:
           max: 300
           unit_of_measurement: seconds
           mode: box
-
+          step: 1
 fields:
   target_position:
     name: 目标位置

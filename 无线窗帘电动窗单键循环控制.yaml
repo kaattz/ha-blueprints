@@ -16,17 +16,26 @@ blueprint:
       name: 目标窗帘
       selector:
         entity:
-          domain: cover
+          domain:
+          - cover
+          reorder: false
+          multiple: false
     time_helper:
       name: 结束时间辅助实体（input_datetime）
       selector:
         entity:
-          domain: input_datetime
+          domain:
+          - input_datetime
+          reorder: false
+          multiple: false
     last_action_helper:
       name: 上次动作记录（open / close）
       selector:
         entity:
-          domain: input_select
+          domain:
+          - input_select
+          reorder: false
+          multiple: false
     total_duration:
       name: 全程运行时间（秒）
       default: 45
@@ -35,19 +44,26 @@ blueprint:
           min: 1
           max: 300
           unit_of_measurement: seconds
+          step: 1
+          mode: slider
     knx_group_addresses:
       name: KNX Group Address 列表
-      description: |
-        示例：[1/1/1, 1/1/2]
+      description: '示例：[1/1/1, 1/1/2]
+
+        '
       default: []
       selector:
-        object: null
+        object:
+          multiple: false
     linp_event_entity:
       name: 领普/米家事件实体（event.xxx，可留空）
       default: ''
       selector:
         entity:
-          domain: event
+          domain:
+          - event
+          reorder: false
+          multiple: false
     linp_button_number:
       name: 领普通按键编号（1=左，2=上，3=右，4=下）
       default: 1
@@ -56,22 +72,29 @@ blueprint:
           min: 1
           max: 4
           step: 1
+          mode: slider
     generic_event_entity:
       name: 通用单键事件（event.xxx，可留空）
       default: ''
       selector:
         entity:
-          domain: event
+          domain:
+          - event
+          reorder: false
+          multiple: false
     z2m_device:
       name: Z2M / IKEA 遥控器设备（可留空）
       default: ''
       selector:
-        device: {}
+        device:
+          multiple: false
     z2m_action:
       name: Z2M 动作名
       default: toggle
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
   source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E6%97%A0%E7%BA%BF%E7%AA%97%E5%B8%98%E7%94%B5%E5%8A%A8%E7%AA%97%E5%8D%95%E9%94%AE%E5%BE%AA%E7%8E%AF%E6%8E%A7%E5%88%B6.yaml
 mode: parallel
 max: 10

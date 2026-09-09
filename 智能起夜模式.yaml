@@ -25,7 +25,10 @@ blueprint:
       description: 'Binary Sensor: on=在床上, off=离床'
       selector:
         entity:
-          domain: binary_sensor
+          domain:
+          - binary_sensor
+          reorder: false
+          multiple: false
     bedroom_status_light:
       name: 卧室灯光状态检测 (核心)
       description: ⚠️ 必须包含卧室所有灯的组(Group)或传感器。
@@ -35,6 +38,8 @@ blueprint:
           - light
           - binary_sensor
           - group
+          reorder: false
+          multiple: false
     motion_sensor_bedside:
       name: 床边/地脚传感器
       description: 用于检测下床动作。支持 Binary 或 Event。
@@ -43,31 +48,42 @@ blueprint:
           domain:
           - binary_sensor
           - event
+          reorder: false
+          multiple: false
     motion_event_keyword:
       name: Event 触发关键词
       description: 仅 Event 实体需要填写，如 '有人移动'。Binary Sensor 忽略此项。
       default: 有人移动
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
     helper_sleep_mode:
       name: 辅助开关：睡眠模式
       description: ⚠️ 选预先创建好的 Input Boolean。
       selector:
         entity:
-          domain: input_boolean
+          domain:
+          - input_boolean
+          reorder: false
+          multiple: false
     helper_get_up_mode:
       name: 辅助开关：起床模式
       description: ⚠️ 选预先创建好的 Input Boolean。
       selector:
         entity:
-          domain: input_boolean
+          domain:
+          - input_boolean
+          reorder: false
+          multiple: false
     bedside_lights:
       name: '[床头] 灯光实体'
       description: 起夜时首先点亮的灯光
       selector:
         target:
           entity:
-            domain: light
+          - domain:
+            - light
     bedside_brightness:
       name: '[床头] 亮度 (%)'
       default: 2
@@ -76,6 +92,8 @@ blueprint:
           min: 1
           max: 100
           unit_of_measurement: '%'
+          step: 1
+          mode: slider
     bedside_kelvin:
       name: '[床头] 色温 (K)'
       default: 3000
@@ -84,15 +102,20 @@ blueprint:
           min: 2000
           max: 6500
           unit_of_measurement: K
+          step: 1
+          mode: slider
     bedroom_illuminance_sensor:
       name: '[床头] 照度传感器'
       description: 可选。未配置或状态不可用时使用太阳状态兜底。
       default: []
       selector:
         entity:
-          domain: sensor
-          device_class: illuminance
+          domain:
+          - sensor
+          device_class:
+          - illuminance
           multiple: true
+          reorder: false
     bedroom_illuminance_threshold:
       name: '[床头] 夜灯照度阈值'
       default: 15
@@ -108,15 +131,18 @@ blueprint:
       default: []
       selector:
         entity:
-          domain: binary_sensor
+          domain:
+          - binary_sensor
           multiple: true
+          reorder: false
     path_passage_lights:
       name: '[通道/客厅] 灯光实体'
       default: []
       selector:
         target:
           entity:
-            domain: light
+          - domain:
+            - light
     path_passage_brightness:
       name: '[通道/客厅] 亮度 (%)'
       default: 3
@@ -125,6 +151,8 @@ blueprint:
           min: 1
           max: 100
           unit_of_measurement: '%'
+          step: 1
+          mode: slider
     path_passage_kelvin:
       name: '[通道/客厅] 色温 (K)'
       default: 3000
@@ -133,15 +161,20 @@ blueprint:
           min: 2000
           max: 6500
           unit_of_measurement: K
+          step: 1
+          mode: slider
     path_passage_illuminance_sensor:
       name: '[通道/客厅] 照度传感器'
       description: 可选。未配置或状态不可用时使用太阳状态兜底。
       default: []
       selector:
         entity:
-          domain: sensor
-          device_class: illuminance
+          domain:
+          - sensor
+          device_class:
+          - illuminance
           multiple: true
+          reorder: false
     path_passage_illuminance_threshold:
       name: '[通道/客厅] 夜灯照度阈值'
       default: 15
@@ -157,15 +190,18 @@ blueprint:
       default: []
       selector:
         entity:
-          domain: binary_sensor
+          domain:
+          - binary_sensor
           multiple: true
+          reorder: false
     path_a_lights:
       name: '[终点 A] 灯光实体'
       default: []
       selector:
         target:
           entity:
-            domain: light
+          - domain:
+            - light
     path_a_brightness:
       name: '[终点 A] 亮度 (%)'
       default: 3
@@ -174,6 +210,8 @@ blueprint:
           min: 1
           max: 100
           unit_of_measurement: '%'
+          step: 1
+          mode: slider
     path_a_kelvin:
       name: '[终点 A] 色温 (K)'
       default: 3000
@@ -182,15 +220,20 @@ blueprint:
           min: 2000
           max: 6500
           unit_of_measurement: K
+          step: 1
+          mode: slider
     path_a_illuminance_sensor:
       name: '[终点 A] 照度传感器'
       description: 可选。未配置或状态不可用时使用太阳状态兜底。
       default: []
       selector:
         entity:
-          domain: sensor
-          device_class: illuminance
+          domain:
+          - sensor
+          device_class:
+          - illuminance
           multiple: true
+          reorder: false
     path_a_illuminance_threshold:
       name: '[终点 A] 夜灯照度阈值'
       default: 15
@@ -206,15 +249,18 @@ blueprint:
       default: []
       selector:
         entity:
-          domain: binary_sensor
+          domain:
+          - binary_sensor
           multiple: true
+          reorder: false
     path_b_lights:
       name: '[终点 B] 灯光实体'
       default: []
       selector:
         target:
           entity:
-            domain: light
+          - domain:
+            - light
     path_b_brightness:
       name: '[终点 B] 亮度 (%)'
       default: 3
@@ -223,6 +269,8 @@ blueprint:
           min: 1
           max: 100
           unit_of_measurement: '%'
+          step: 1
+          mode: slider
     path_b_kelvin:
       name: '[终点 B] 色温 (K)'
       default: 3000
@@ -231,15 +279,20 @@ blueprint:
           min: 2000
           max: 6500
           unit_of_measurement: K
+          step: 1
+          mode: slider
     path_b_illuminance_sensor:
       name: '[终点 B] 照度传感器'
       description: 可选。未配置或状态不可用时使用太阳状态兜底。
       default: []
       selector:
         entity:
-          domain: sensor
-          device_class: illuminance
+          domain:
+          - sensor
+          device_class:
+          - illuminance
           multiple: true
+          reorder: false
     path_b_illuminance_threshold:
       name: '[终点 B] 夜灯照度阈值'
       default: 15
@@ -256,7 +309,8 @@ blueprint:
       selector:
         target:
           entity:
-            domain: light
+          - domain:
+            - light
     sleep_start_time:
       name: 自动入睡/起夜开始时间
       description: 可调整，默认 21:00。开始时间与结束时间之间必须留出超过 30 分钟的非起夜区间。
@@ -278,6 +332,8 @@ blueprint:
           min: 0
           max: 600
           unit_of_measurement: seconds
+          step: 1
+          mode: slider
   source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E6%99%BA%E8%83%BD%E8%B5%B7%E5%A4%9C%E6%A8%A1%E5%BC%8F.yaml
 mode: queued
 max: 10

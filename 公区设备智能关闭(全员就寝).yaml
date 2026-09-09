@@ -9,9 +9,6 @@ blueprint:
   source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E5%85%AC%E5%8C%BA%E8%AE%BE%E5%A4%87%E6%99%BA%E8%83%BD%E5%85%B3%E9%97%AD(%E5%85%A8%E5%91%98%E5%B0%B1%E5%AF%9D).yaml
 
   input:
-    # =========================================
-    # 1. 全局设置
-    # =========================================
     section_global:
       name: 全局设置
       icon: mdi:cog
@@ -19,26 +16,28 @@ blueprint:
         wait_time:
           name: 确认延迟 (Wait Time)
           description: 全员在床后，等待多久再执行关灯？(例如 3 分钟)。期间如果有人下床，将取消执行。
-          default: 
+          default:
             minutes: 3
           selector:
-            duration: {}
-
+            duration:
+              enable_second: true
         public_area_sensors:
           name: 公区安全检查 (必选)
-          description: |
-            只有当这些区域全部无人时，才会执行关闭。
+          description: '只有当这些区域全部无人时，才会执行关闭。
+
+            '
           default: []
           selector:
             entity:
               multiple: true
               filter:
-                - domain: binary_sensor
-                  device_class: [motion, occupancy, presence]
-
-    # =========================================
-    # 2. 人员配置
-    # =========================================
+              - domain:
+                - binary_sensor
+                device_class:
+                - motion
+                - occupancy
+                - presence
+              reorder: false
     section_person_1:
       name: 成员 1 配置
       icon: mdi:account
@@ -46,10 +45,14 @@ blueprint:
       input:
         p1_tracker:
           name: 人员定位
-          default: ""
+          default: ''
           selector:
             entity:
-              domain: [device_tracker, person]
+              domain:
+              - device_tracker
+              - person
+              reorder: false
+              multiple: false
         p1_bed_sensors:
           name: 床铺传感器
           default: []
@@ -57,8 +60,9 @@ blueprint:
             entity:
               multiple: true
               filter:
-                - domain: binary_sensor
-
+              - domain:
+                - binary_sensor
+              reorder: false
     section_person_2:
       name: 成员 2 配置
       icon: mdi:account
@@ -66,10 +70,14 @@ blueprint:
       input:
         p2_tracker:
           name: 人员定位
-          default: ""
+          default: ''
           selector:
             entity:
-              domain: [device_tracker, person]
+              domain:
+              - device_tracker
+              - person
+              reorder: false
+              multiple: false
         p2_bed_sensors:
           name: 床铺传感器
           default: []
@@ -77,8 +85,9 @@ blueprint:
             entity:
               multiple: true
               filter:
-                - domain: binary_sensor
-
+              - domain:
+                - binary_sensor
+              reorder: false
     section_person_3:
       name: 成员 3 配置
       icon: mdi:account
@@ -86,10 +95,14 @@ blueprint:
       input:
         p3_tracker:
           name: 人员定位
-          default: ""
+          default: ''
           selector:
             entity:
-              domain: [device_tracker, person]
+              domain:
+              - device_tracker
+              - person
+              reorder: false
+              multiple: false
         p3_bed_sensors:
           name: 床铺传感器
           default: []
@@ -97,8 +110,9 @@ blueprint:
             entity:
               multiple: true
               filter:
-                - domain: binary_sensor
-
+              - domain:
+                - binary_sensor
+              reorder: false
     section_person_4:
       name: 成员 4 配置
       icon: mdi:account
@@ -106,10 +120,14 @@ blueprint:
       input:
         p4_tracker:
           name: 人员定位
-          default: ""
+          default: ''
           selector:
             entity:
-              domain: [device_tracker, person]
+              domain:
+              - device_tracker
+              - person
+              reorder: false
+              multiple: false
         p4_bed_sensors:
           name: 床铺传感器
           default: []
@@ -117,11 +135,9 @@ blueprint:
             entity:
               multiple: true
               filter:
-                - domain: binary_sensor
-
-    # =========================================
-    # 3. 执行动作
-    # =========================================
+              - domain:
+                - binary_sensor
+              reorder: false
     section_actions:
       name: 执行动作
       icon: mdi:flash
@@ -132,22 +148,24 @@ blueprint:
           selector:
             target:
               entity:
-                domain: light
+              - domain:
+                - light
         target_medias:
           name: 关闭媒体/电视
           default: []
           selector:
             target:
               entity:
-                domain: media_player
+              - domain:
+                - media_player
         target_climates:
           name: 关闭空调
           default: []
           selector:
             target:
               entity:
-                domain: climate
-
+              - domain:
+                - climate
 # 核心触发逻辑
 trigger:
   - platform: template

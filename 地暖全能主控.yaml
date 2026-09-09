@@ -19,37 +19,56 @@ blueprint:
           description: 选择 input_boolean.floorheating_enabled；关闭后，本蓝图所有自动控制动作都会跳过。
           selector:
             entity:
-              domain: input_boolean
+              domain:
+              - input_boolean
+              reorder: false
+              multiple: false
         rinnai_boiler:
           name: 林内锅炉实体 (Climate)
           selector:
             entity:
-              domain: climate
+              domain:
+              - climate
+              reorder: false
+              multiple: false
         sensor_today_max:
           name: 今日最高气温 (Sensor)
           description: 选择 package 生成的 sensor.today_max_temp
           selector:
             entity:
-              domain: sensor
-              device_class: temperature
+              domain:
+              - sensor
+              device_class:
+              - temperature
+              reorder: false
+              multiple: false
         outdoor_temp_sensor:
           name: 室外实时温度
           selector:
             entity:
-              domain: sensor
-              device_class: temperature
+              domain:
+              - sensor
+              device_class:
+              - temperature
+              reorder: false
+              multiple: false
         climate_living:
           name: 客厅温控器 (主负载/旁通)
           description: 水路最大的房间，用于保证最小流量。
           selector:
             entity:
-              domain: climate
+              domain:
+              - climate
+              reorder: false
+              multiple: false
         climate_bedrooms:
           name: 卧室温控器 (触发源)
           selector:
             entity:
-              domain: climate
+              domain:
+              - climate
               multiple: true
+              reorder: false
     section_weather_water:
       name: 天气阈值与锅炉水温
       icon: mdi:thermometer-water
@@ -64,6 +83,7 @@ blueprint:
               max: 15
               step: 1
               unit_of_measurement: °C
+              mode: slider
         threshold_forecast:
           name: 【预报】寒潮阈值 (最高温)
           default: 12
@@ -73,6 +93,7 @@ blueprint:
               max: 25
               step: 1
               unit_of_measurement: °C
+              mode: slider
         temp_water_cold:
           name: 寒潮模式水温 (高)
           default: 50
@@ -82,6 +103,7 @@ blueprint:
               max: 60
               step: 1
               unit_of_measurement: °C
+              mode: slider
         temp_water_eco:
           name: 节能模式水温 (低)
           default: 40
@@ -91,6 +113,7 @@ blueprint:
               max: 50
               step: 1
               unit_of_measurement: °C
+              mode: slider
     section_room_temps:
       name: 室内目标温度设置
       icon: mdi:home-thermometer
@@ -105,6 +128,7 @@ blueprint:
               max: 30
               step: 0.5
               unit_of_measurement: °C
+              mode: slider
         temp_solar_save:
           name: 节能温度 (白天)
           default: 19
@@ -114,6 +138,7 @@ blueprint:
               max: 30
               step: 0.5
               unit_of_measurement: °C
+              mode: slider
         temp_sleep:
           name: 睡眠温度 (深夜)
           default: 20.5
@@ -123,6 +148,7 @@ blueprint:
               max: 30
               step: 0.5
               unit_of_measurement: °C
+              mode: slider
     section_protection:
       name: 高级保护 (防启停)
       icon: mdi:shield-check
@@ -138,6 +164,7 @@ blueprint:
               max: 5
               step: 0.5
               unit_of_measurement: °C
+              mode: slider
         companion_deadband:
           name: 陪跑死区 (防来回跳)
           description: 客厅目标温度超过“陪跑目标 - 死区”时不再重复下发
@@ -148,11 +175,12 @@ blueprint:
               max: 2
               step: 0.1
               unit_of_measurement: °C
+              mode: slider
         allow_companion_at_night:
           name: 深夜允许陪跑
           default: false
           selector:
-            boolean: null
+            boolean: {}
     section_schedule:
       name: 时间日程设置
       icon: mdi:clock-outline
@@ -162,22 +190,22 @@ blueprint:
           name: 早晨舒适开始时间
           default: 06:00:00
           selector:
-            time: null
+            time: {}
         time_day:
           name: 白天模式开始时间
           default: 09:00:00
           selector:
-            time: null
+            time: {}
         time_evening:
           name: 晚间舒适开始时间
           default: '17:00:00'
           selector:
-            time: null
+            time: {}
         time_night:
           name: 深夜睡眠开始时间
           default: '23:00:00'
           selector:
-            time: null
+            time: {}
     section_helpers:
       name: 锁定与延时 (必配)
       icon: mdi:timer-lock
@@ -188,7 +216,10 @@ blueprint:
           description: 需要你新建一个 input_datetime（日期+时间）
           selector:
             entity:
-              domain: input_datetime
+              domain:
+              - input_datetime
+              reorder: false
+              multiple: false
         water_change_lock_minutes:
           name: 水温切换锁定分钟数
           default: 30
@@ -198,6 +229,7 @@ blueprint:
               max: 180
               step: 5
               unit_of_measurement: min
+              mode: slider
         boiler_off_delay_minutes:
           name: 全部房间 off 后，锅炉延时关机分钟数
           default: 20
@@ -207,6 +239,7 @@ blueprint:
               max: 120
               step: 5
               unit_of_measurement: min
+              mode: slider
   source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E5%9C%B0%E6%9A%96%E5%85%A8%E8%83%BD%E4%B8%BB%E6%8E%A7.yaml
 mode: restart
 trigger_variables:

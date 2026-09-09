@@ -18,102 +18,147 @@ blueprint:
       description: 选择你的 input_select 实体。
       selector:
         entity:
-          domain: input_select
+          domain:
+          - input_select
+          reorder: false
+          multiple: false
     reset_option:
       name: 复位/默认选项名称
       description: 执行完毕后自动跳回的选项 (如 "请选择" )。必须与 input_select 中的选项完全一致。
       default: 请选择
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
     scene_option_1:
       name: 场景 1 名称
       description: 对应下拉框中的选项名称。
       default: ''
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
     script_1:
       name: 场景 1 执行脚本
       default: []
       selector:
         entity:
-          domain: script
+          domain:
+          - script
+          reorder: false
+          multiple: false
     scene_option_2:
       name: 场景 2 名称
       default: ''
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
     script_2:
       name: 场景 2 执行脚本
       default: []
       selector:
         entity:
-          domain: script
+          domain:
+          - script
+          reorder: false
+          multiple: false
     scene_option_3:
       name: 场景 3 名称
       default: ''
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
     script_3:
       name: 场景 3 执行脚本
       default: []
       selector:
         entity:
-          domain: script
+          domain:
+          - script
+          reorder: false
+          multiple: false
     scene_option_4:
       name: 场景 4 名称
       default: ''
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
     script_4:
       name: 场景 4 执行脚本
       default: []
       selector:
         entity:
-          domain: script
+          domain:
+          - script
+          reorder: false
+          multiple: false
     scene_option_5:
       name: 场景 5 名称
       default: ''
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
     script_5:
       name: 场景 5 执行脚本
       default: []
       selector:
         entity:
-          domain: script
+          domain:
+          - script
+          reorder: false
+          multiple: false
     scene_option_6:
       name: 场景 6 名称
       default: ''
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
     script_6:
       name: 场景 6 执行脚本
       default: []
       selector:
         entity:
-          domain: script
+          domain:
+          - script
+          reorder: false
+          multiple: false
     scene_option_7:
       name: 场景 7 名称
       default: ''
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
     script_7:
       name: 场景 7 执行脚本
       default: []
       selector:
         entity:
-          domain: script
+          domain:
+          - script
+          reorder: false
+          multiple: false
     scene_option_8:
       name: 场景 8 名称
       default: ''
       selector:
-        text: {}
+        text:
+          multiple: false
+          multiline: false
     script_8:
       name: 场景 8 执行脚本
       default: []
       selector:
         entity:
-          domain: script
+          domain:
+          - script
+          reorder: false
+          multiple: false
   source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E5%9C%BA%E6%99%AF%E6%A8%A1%E5%BC%8F%E9%80%89%E6%8B%A9%E5%99%A8.yaml
 trigger:
 - platform: state

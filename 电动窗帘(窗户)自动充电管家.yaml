@@ -16,23 +16,30 @@ blueprint:
       description: 窗帘或电动窗的电量实体 (0-100%)
       selector:
         entity:
-          domain: sensor
-          device_class: battery
-
+          domain:
+          - sensor
+          device_class:
+          - battery
+          reorder: false
+          multiple: false
     smart_plug:
       name: 充电插座
       description: 控制充电器的智能插座
       selector:
         entity:
-          domain: switch
-
+          domain:
+          - switch
+          reorder: false
+          multiple: false
     notify_script:
       name: 通知脚本
       description: 用于发送通知的脚本 (例如 script.alert_notify)
       selector:
         entity:
-          domain: script
-
+          domain:
+          - script
+          reorder: false
+          multiple: false
     low_threshold:
       name: 开始充电电量 (%)
       description: 低于此电量时开始充电 (建议 15-20%)
@@ -42,9 +49,8 @@ blueprint:
           min: 0
           max: 50
           step: 1
-          unit_of_measurement: "%"
+          unit_of_measurement: '%'
           mode: slider
-
     high_threshold:
       name: 停止充电电量 (%)
       description: 高于此电量时停止充电 (建议 90-100%)
@@ -54,9 +60,8 @@ blueprint:
           min: 50
           max: 100
           step: 1
-          unit_of_measurement: "%"
+          unit_of_measurement: '%'
           mode: slider
-
     max_charge_time:
       name: 最长充电时间 (超时保护)
       description: 无论电量是否充满，插座开启超过此时间强制关闭。
@@ -66,7 +71,7 @@ blueprint:
         seconds: 0
       selector:
         duration:
-
+          enable_second: true
 mode: restart
 max_exceeded: silent
 

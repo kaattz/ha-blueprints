@@ -52,8 +52,12 @@ blueprint:
           name: 光照传感器
           selector:
             entity:
-              domain: sensor
-              device_class: illuminance
+              domain:
+              - sensor
+              device_class:
+              - illuminance
+              reorder: false
+              multiple: false
         illuminance_threshold:
           name: 开灯光照阈值 (lx)
           default: 40
@@ -61,6 +65,8 @@ blueprint:
             number:
               min: 0
               max: 1000
+              step: 1
+              mode: slider
         setting_light_brightness:
           name: 开启亮度 (%)
           default: 100
@@ -69,6 +75,8 @@ blueprint:
               min: 1
               max: 100
               unit_of_measurement: '%'
+              step: 1
+              mode: slider
         setting_light_kelvin:
           name: 开启色温 (K)
           default: 3000
@@ -85,72 +93,94 @@ blueprint:
               min: 5
               max: 300
               unit_of_measurement: seconds
+              step: 1
+              mode: slider
         main_presence_sensor:
           name: '[主区域] 人体传感器'
           selector:
             entity:
-              domain: binary_sensor
+              domain:
+              - binary_sensor
               device_class:
               - occupancy
               - motion
+              reorder: false
+              multiple: false
         light_sink_area:
           name: '[主区域] 灯光'
           selector:
             target:
               entity:
-                domain: light
+              - domain:
+                - light
         shower_presence_sensor:
           name: '[淋浴区] 人体传感器'
           selector:
             entity:
-              domain: binary_sensor
+              domain:
+              - binary_sensor
               device_class:
               - occupancy
               - motion
+              reorder: false
+              multiple: false
         water_leak_sensor:
           name: '[淋浴区] 水浸传感器'
           selector:
             entity:
-              domain: binary_sensor
-              device_class: moisture
+              domain:
+              - binary_sensor
+              device_class:
+              - moisture
+              reorder: false
+              multiple: false
         light_shower_area:
           name: '[淋浴区] 灯光'
           selector:
             target:
               entity:
-                domain: light
+              - domain:
+                - light
         zone_a_presence_sensor:
           name: '[扩展区 A] 人体传感器'
           default: []
           selector:
             entity:
-              domain: binary_sensor
+              domain:
+              - binary_sensor
               device_class:
               - occupancy
               - motion
+              reorder: false
+              multiple: false
         light_zone_a:
           name: '[扩展区 A] 灯光'
           default: {}
           selector:
             target:
               entity:
-                domain: light
+              - domain:
+                - light
         zone_b_presence_sensor:
           name: '[扩展区 B] 人体传感器'
           default: []
           selector:
             entity:
-              domain: binary_sensor
+              domain:
+              - binary_sensor
               device_class:
               - occupancy
               - motion
+              reorder: false
+              multiple: false
         light_zone_b:
           name: '[扩展区 B] 灯光'
           default: {}
           selector:
             target:
               entity:
-                domain: light
+              - domain:
+                - light
     section_helpers:
       name: 核心标志位与互斥
       description: 必须配置标志位。
@@ -161,18 +191,27 @@ blueprint:
           name: '[标志位 1] 本区域正在洗澡'
           selector:
             entity:
-              domain: input_boolean
+              domain:
+              - input_boolean
+              reorder: false
+              multiple: false
         input_bool_post:
           name: '[标志位 2] 本区域洗澡后续'
           selector:
             entity:
-              domain: input_boolean
+              domain:
+              - input_boolean
+              reorder: false
+              multiple: false
         input_bool_window_manual_close_lock:
           name: '[标志位 3] 除湿手动关窗锁定'
           description: 除湿中手动关闭排气窗后，本轮不再自动开窗。
           selector:
             entity:
-              domain: input_boolean
+              domain:
+              - input_boolean
+              reorder: false
+              multiple: false
         setting_post_timeout:
           name: 洗澡后处理最大时长 (分钟)
           description: 如果 [本区域洗澡后续] 标志位开启超过此时间未自动关闭，系统将强制关闭相关设备。
@@ -182,20 +221,26 @@ blueprint:
               min: 60
               max: 300
               unit_of_measurement: min
+              step: 1
+              mode: slider
         input_other_shower_active:
           name: '[互斥锁] 其他区域正在洗澡'
           default: []
           selector:
             entity:
-              domain: input_boolean
+              domain:
+              - input_boolean
               multiple: true
+              reorder: false
         input_get_up_mode:
           name: '[辅助] 起床模式'
           default: []
           selector:
             entity:
               multiple: true
-              domain: input_boolean
+              domain:
+              - input_boolean
+              reorder: false
     section_env:
       name: 环境与硬件设施
       icon: mdi:window-shutter-auto
@@ -205,7 +250,10 @@ blueprint:
           name: 循环泵开关
           selector:
             entity:
-              domain: switch
+              domain:
+              - switch
+              reorder: false
+              multiple: false
         setting_pump_temp_threshold:
           name: 循环泵开启温度 (°C)
           default: 28
@@ -213,6 +261,8 @@ blueprint:
             number:
               min: -20
               max: 40
+              step: 1
+              mode: slider
         pump_max_runtime:
           name: 循环泵日常运行时间 (分钟)
           default: 1
@@ -222,11 +272,15 @@ blueprint:
               max: 10
               step: 0.5
               unit_of_measurement: min
+              mode: slider
         cover_blinds:
           name: 百叶帘
           selector:
             entity:
-              domain: cover
+              domain:
+              - cover
+              reorder: false
+              multiple: false
         setting_blind_auto_schedule:
           name: 启用定时开关窗帘
           default: false
@@ -254,11 +308,17 @@ blueprint:
                 value: smart
               - label: 禁用
                 value: disabled
+              sort: false
+              custom_value: false
+              multiple: false
         cover_window:
           name: 电动窗 (排气)
           selector:
             entity:
-              domain: cover
+              domain:
+              - cover
+              reorder: false
+              multiple: false
         setting_window_auto_close:
           name: 启用定时关窗
           default: false
@@ -280,6 +340,8 @@ blueprint:
               - binary_sensor
               - sensor
               - input_boolean
+              reorder: false
+              multiple: false
         setting_window_close_pos:
           name: 关窗保留位置 (%)
           default: 15
@@ -288,18 +350,28 @@ blueprint:
               min: 0
               max: 100
               unit_of_measurement: '%'
+              step: 1
+              mode: slider
         bathroom_humidity_sensor:
           name: 卫生间湿度
           selector:
             entity:
-              domain: sensor
-              device_class: humidity
+              domain:
+              - sensor
+              device_class:
+              - humidity
+              reorder: false
+              multiple: false
         reference_humidity_sensor:
           name: 客厅参考湿度
           selector:
             entity:
-              domain: sensor
-              device_class: humidity
+              domain:
+              - sensor
+              device_class:
+              - humidity
+              reorder: false
+              multiple: false
         setting_humidity_diff_threshold:
           name: 湿度差关闭阈值 (%)
           description: 当卫生间与参考湿度差值低于此值时，停止除湿。
@@ -310,6 +382,7 @@ blueprint:
               max: 15
               step: 0.5
               unit_of_measurement: '%'
+              mode: slider
     section_heater:
       name: 浴霸与智能马桶
       icon: mdi:weather-windy
@@ -320,7 +393,10 @@ blueprint:
           description: 选择浴霸 Climate 实体。需支持 heat、dry、fan_only、off 模式。
           selector:
             entity:
-              domain: climate
+              domain:
+              - climate
+              reorder: false
+              multiple: false
         setting_ventilation_trigger_mode:
           name: 换气触发方式
           default: entry
@@ -331,12 +407,18 @@ blueprint:
                 value: entry
               - label: 智能马桶就座才换气
                 value: seat
+              sort: false
+              custom_value: false
+              multiple: false
         toilet_seat_sensor:
           name: 智能马桶就座状态
           description: 选择智能马桶的就座状态实体，例如 binary_sensor.master_bathroom_toilet_seat_occupancy。
           selector:
             entity:
-              domain: binary_sensor
+              domain:
+              - binary_sensor
+              reorder: false
+              multiple: false
         setting_auto_heat_temp:
           name: 自动暖风触发温度 (°C)
           default: 22
@@ -344,11 +426,16 @@ blueprint:
             number:
               min: -20
               max: 40
+              step: 1
+              mode: slider
         weather_temp_sensor:
           name: 室外温度
           selector:
             entity:
-              domain: sensor
+              domain:
+              - sensor
+              reorder: false
+              multiple: false
     section_debug:
       name: 调试
       icon: mdi:bug

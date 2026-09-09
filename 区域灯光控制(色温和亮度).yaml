@@ -10,29 +10,35 @@ blueprint:
       name: 目标区域
       description: 请选择要控制的区域（列表读取自“配置-区域与标签”）。
       selector:
-        area: {} 
-    
+        area:
+          reorder: false
+          multiple: false
     brightness_input:
       name: 亮度选择器
       description: 控制亮度的 Input Select (支持 "50%", "关灯")。
       selector:
         entity:
-          domain: input_select
-    
+          domain:
+          - input_select
+          reorder: false
+          multiple: false
     color_temp_input:
       name: 色温选择器
       description: 控制色温的 Input Select (支持 "4000K", 整数)。
       selector:
         entity:
-          domain: input_select
-          
+          domain:
+          - input_select
+          reorder: false
+          multiple: false
     exclude_keyword:
       name: 排除关键词
       description: 实体ID中包含此关键词的灯将被忽略 (默认排除 iot_cn)。
-      default: "iot_cn"
+      default: iot_cn
       selector:
-        text: {}
-
+        text:
+          multiple: false
+          multiline: false
 # 同时监听亮度或色温的变化
 trigger:
   - platform: state
