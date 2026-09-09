@@ -1,5 +1,5 @@
 blueprint:
-  name: 场景模式选择器 (8路回弹·容错版)
+  name: 场景模式选择器
   description: |
     ### 功能
     关联 `Input Select` 与 `Script`，执行后自动重置。
@@ -19,19 +19,16 @@ blueprint:
       selector:
         entity:
           domain: input_select
-    
     reset_option:
       name: 复位/默认选项名称
       description: 执行完毕后自动跳回的选项 (如 "请选择" )。必须与 input_select 中的选项完全一致。
       default: 请选择
       selector:
         text: {}
-
-    # --- 场景配置区域 (最多8个) ---
     scene_option_1:
       name: 场景 1 名称
       description: 对应下拉框中的选项名称。
-      default: ""
+      default: ''
       selector:
         text: {}
     script_1:
@@ -40,10 +37,9 @@ blueprint:
       selector:
         entity:
           domain: script
-
     scene_option_2:
       name: 场景 2 名称
-      default: ""
+      default: ''
       selector:
         text: {}
     script_2:
@@ -52,10 +48,9 @@ blueprint:
       selector:
         entity:
           domain: script
-
     scene_option_3:
       name: 场景 3 名称
-      default: ""
+      default: ''
       selector:
         text: {}
     script_3:
@@ -64,10 +59,9 @@ blueprint:
       selector:
         entity:
           domain: script
-
     scene_option_4:
       name: 场景 4 名称
-      default: ""
+      default: ''
       selector:
         text: {}
     script_4:
@@ -76,10 +70,9 @@ blueprint:
       selector:
         entity:
           domain: script
-
     scene_option_5:
       name: 场景 5 名称
-      default: ""
+      default: ''
       selector:
         text: {}
     script_5:
@@ -88,10 +81,9 @@ blueprint:
       selector:
         entity:
           domain: script
-
     scene_option_6:
       name: 场景 6 名称
-      default: ""
+      default: ''
       selector:
         text: {}
     script_6:
@@ -100,10 +92,9 @@ blueprint:
       selector:
         entity:
           domain: script
-          
     scene_option_7:
       name: 场景 7 名称
-      default: ""
+      default: ''
       selector:
         text: {}
     script_7:
@@ -112,10 +103,9 @@ blueprint:
       selector:
         entity:
           domain: script
-
     scene_option_8:
       name: 场景 8 名称
-      default: ""
+      default: ''
       selector:
         text: {}
     script_8:
@@ -124,88 +114,73 @@ blueprint:
       selector:
         entity:
           domain: script
-
+  source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E5%9C%BA%E6%99%AF%E6%A8%A1%E5%BC%8F%E9%80%89%E6%8B%A9%E5%99%A8.yaml
 trigger:
-  - platform: state
-    entity_id: !input select_entity
-
+- platform: state
+  entity_id: !input 'select_entity'
 mode: single
-
 variables:
-  # 获取当前选中的状态，并转化为字符串
-  current_raw: "{{ trigger.to_state.state | string }}"
-  # 获取设置的复位选项
-  reset_raw: !input reset_option
-  
-  # 获取所有输入的场景名称
-  opt1: !input scene_option_1
-  opt2: !input scene_option_2
-  opt3: !input scene_option_3
-  opt4: !input scene_option_4
-  opt5: !input scene_option_5
-  opt6: !input scene_option_6
-  opt7: !input scene_option_7
-  opt8: !input scene_option_8
-
+  current_raw: '{{ trigger.to_state.state | string }}'
+  reset_raw: !input 'reset_option'
+  opt1: !input 'scene_option_1'
+  opt2: !input 'scene_option_2'
+  opt3: !input 'scene_option_3'
+  opt4: !input 'scene_option_4'
+  opt5: !input 'scene_option_5'
+  opt6: !input 'scene_option_6'
+  opt7: !input 'scene_option_7'
+  opt8: !input 'scene_option_8'
 action:
-  # 1. 安全检查：如果当前选中的是“复位选项”，直接停止（防止死循环）
-  # 使用 trim 去除空格进行比对
-  - if:
-      - condition: template
-        value_template: "{{ current_raw | trim == reset_raw | string | trim }}"
-    then:
-      - stop: "Selected reset option, action ignored."
-
-  # 2. 执行逻辑：逐个比对，找到匹配的选项并执行脚本
-  # 逻辑说明：(输入不为空) 且 (当前状态 去除空格 == 输入名称 去除空格)
-  - choose:
-      - conditions: "{{ opt1 | string | trim != '' and current_raw | trim == opt1 | string | trim }}"
-        sequence: 
-          - service: script.turn_on
-            target: { entity_id: !input script_1 }
-            
-      - conditions: "{{ opt2 | string | trim != '' and current_raw | trim == opt2 | string | trim }}"
-        sequence: 
-          - service: script.turn_on
-            target: { entity_id: !input script_2 }
-            
-      - conditions: "{{ opt3 | string | trim != '' and current_raw | trim == opt3 | string | trim }}"
-        sequence: 
-          - service: script.turn_on
-            target: { entity_id: !input script_3 }
-            
-      - conditions: "{{ opt4 | string | trim != '' and current_raw | trim == opt4 | string | trim }}"
-        sequence: 
-          - service: script.turn_on
-            target: { entity_id: !input script_4 }
-            
-      - conditions: "{{ opt5 | string | trim != '' and current_raw | trim == opt5 | string | trim }}"
-        sequence: 
-          - service: script.turn_on
-            target: { entity_id: !input script_5 }
-            
-      - conditions: "{{ opt6 | string | trim != '' and current_raw | trim == opt6 | string | trim }}"
-        sequence: 
-          - service: script.turn_on
-            target: { entity_id: !input script_6 }
-
-      - conditions: "{{ opt7 | string | trim != '' and current_raw | trim == opt7 | string | trim }}"
-        sequence: 
-          - service: script.turn_on
-            target: { entity_id: !input script_7 }
-
-      - conditions: "{{ opt8 | string | trim != '' and current_raw | trim == opt8 | string | trim }}"
-        sequence: 
-          - service: script.turn_on
-            target: { entity_id: !input script_8 }
-
-  # 3. 视觉延迟：让下拉框在当前状态停留一小会儿（0.5秒），给用户操作成功的反馈
-  - delay: 
-      milliseconds: 500
-
-  # 4. 自动重置：将 input_select 拨回默认位置
-  - service: input_select.select_option
-    target:
-      entity_id: !input select_entity
-    data:
-      option: "{{ reset_raw | string | trim }}"
+- if:
+  - condition: template
+    value_template: '{{ current_raw | trim == reset_raw | string | trim }}'
+  then:
+  - stop: Selected reset option, action ignored.
+- choose:
+  - conditions: '{{ opt1 | string | trim != '''' and current_raw | trim == opt1 | string | trim }}'
+    sequence:
+    - service: script.turn_on
+      target:
+        entity_id: !input 'script_1'
+  - conditions: '{{ opt2 | string | trim != '''' and current_raw | trim == opt2 | string | trim }}'
+    sequence:
+    - service: script.turn_on
+      target:
+        entity_id: !input 'script_2'
+  - conditions: '{{ opt3 | string | trim != '''' and current_raw | trim == opt3 | string | trim }}'
+    sequence:
+    - service: script.turn_on
+      target:
+        entity_id: !input 'script_3'
+  - conditions: '{{ opt4 | string | trim != '''' and current_raw | trim == opt4 | string | trim }}'
+    sequence:
+    - service: script.turn_on
+      target:
+        entity_id: !input 'script_4'
+  - conditions: '{{ opt5 | string | trim != '''' and current_raw | trim == opt5 | string | trim }}'
+    sequence:
+    - service: script.turn_on
+      target:
+        entity_id: !input 'script_5'
+  - conditions: '{{ opt6 | string | trim != '''' and current_raw | trim == opt6 | string | trim }}'
+    sequence:
+    - service: script.turn_on
+      target:
+        entity_id: !input 'script_6'
+  - conditions: '{{ opt7 | string | trim != '''' and current_raw | trim == opt7 | string | trim }}'
+    sequence:
+    - service: script.turn_on
+      target:
+        entity_id: !input 'script_7'
+  - conditions: '{{ opt8 | string | trim != '''' and current_raw | trim == opt8 | string | trim }}'
+    sequence:
+    - service: script.turn_on
+      target:
+        entity_id: !input 'script_8'
+- delay:
+    milliseconds: 500
+- service: input_select.select_option
+  target:
+    entity_id: !input 'select_entity'
+  data:
+    option: '{{ reset_raw | string | trim }}'

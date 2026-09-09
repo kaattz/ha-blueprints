@@ -6,6 +6,7 @@ blueprint:
     支持防抖动机制：当所有人在床后，等待一段时间（例如3分钟），如果期间有人下床，则取消关闭操作，避免误关。
 
   domain: automation
+  source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E5%85%AC%E5%8C%BA%E8%AE%BE%E5%A4%87%E6%99%BA%E8%83%BD%E5%85%B3%E9%97%AD(%E5%85%A8%E5%91%98%E5%B0%B1%E5%AF%9D).yaml
 
   input:
     # =========================================
