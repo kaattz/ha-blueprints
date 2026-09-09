@@ -1,0 +1,388 @@
+blueprint:
+  name: 公区智能控制
+  description: |
+    适用于 客厅、餐厅、玄关、过道、厨房、储藏室 等公区暂留区域。
+    集成了 **日夜分灯控制**、**多点触发预亮**、**光照干扰修正** 与 **空调独立延时** 功能。
+
+    ### 💡 核心逻辑
+    1. **☀️ 日常模式**：光照不足/日落后 -> 开启【主灯】。
+    2. **🌙 夜间模式**：在设定时间段内 -> 开启【夜间专用灯】。
+    3. **🌑 自动关灯**：无人延时后 -> 同时关闭主灯和夜间灯。
+    4. **❄️ 空调联动**：无人更长延时后 -> 关闭空调，避免频繁开关。
+  domain: automation
+  input:
+    section_core:
+      name: 核心设备与传感器
+      description: 必须配置的基础设备。
+      icon: mdi:home-lightning-bolt
+      collapsed: false
+      input:
+        presence_sensor:
+          name: 主人体传感器 (必选)
+          description: 公区的主要传感器（如客厅吸顶），用于判定“是否还有人”以决定关灯。
+          selector:
+            entity:
+              filter:
+              - domain: binary_sensor
+                device_class:
+                - motion
+                - occupancy
+                - presence
+        secondary_presence_sensor:
+          name: 副/触发传感器列表 (可选)
+          description: |
+            **支持多选**。
+            选择所有通往公区的传感器（如主卧门口、次卧门口、入户门）。
+            当这些位置**任意一个**有人时，都会触发开灯（主要用于夜间预亮）。
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+              - domain: binary_sensor
+                device_class:
+                - motion
+                - occupancy
+                - presence
+        illuminance_sensor:
+          name: 光照传感器
+          selector:
+            entity:
+              filter:
+              - domain: sensor
+                device_class: illuminance
+        light_target:
+          name: ☀️ 日常主灯
+          description: 白天/傍晚自动开启的灯具。
+          selector:
+            target:
+              entity:
+                domain: light
+    section_day_mode:
+      name: 日常模式设置
+      description: 非夜间时段的参数。
+      icon: mdi:white-balance-sunny
+      collapsed: true
+      input:
+        lux_threshold:
+          name: 开灯光照阈值 (lx)
+          default: 10
+          selector:
+            number:
+              min: 0
+              max: 500
+              mode: slider
+              unit_of_measurement: lx
+        enable_sunset:
+          name: 启用日落判断
+          default: false
+          selector:
+            boolean: {}
+        interfering_lights:
+          name: 🚫 光照干扰源 (防误判)
+          description: |
+            选择邻近区域的灯。当这些灯亮着时，忽略光照阈值强制开灯。
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+              - domain: light
+        brightness_setting:
+          name: 日常亮度 (%)
+          default: 80
+          selector:
+            number:
+              min: 1
+              max: 100
+              mode: slider
+        color_temp_setting:
+          name: 日常色温 (K)
+          default: 3000
+          selector:
+            number:
+              min: 2700
+              max: 6500
+              step: 50
+              unit_of_measurement: K
+              mode: slider
+    section_night_mode:
+      name: 夜间模式设置
+      description: 夜间时段将开启独立的灯光。
+      icon: mdi:weather-night
+      collapsed: true
+      input:
+        night_time_after:
+          name: 夜间开始时间
+          description: 进入夜间模式的时间（如 23:00）。
+          default: '23:00:00'
+          selector:
+            time: {}
+        night_time_before:
+          name: 夜间结束时间
+          description: 退出夜间模式的时间（如 06:00）。
+          default: 06:00:00
+          selector:
+            time: {}
+        night_light_target:
+          name: 夜间专用灯
+          description: |
+            **关键设置：** 起夜时开启的灯（如灯带、落地灯）。
+            若留空，夜间将继续使用“日常主灯”，但应用下方的亮度/色温。
+          default: {}
+          selector:
+            target:
+              entity:
+                domain: light
+        night_brightness:
+          name: 夜间亮度 (%)
+          description: 建议设置较低亮度，避免刺眼。
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 100
+              mode: slider
+        night_kelvin:
+          name: 夜间色温 (K)
+          description: 建议设置暖色温（如 3000K）。
+          default: 3000
+          selector:
+            number:
+              min: 2000
+              max: 6500
+              step: 50
+              unit_of_measurement: K
+              mode: slider
+    section_turn_off:
+      name: 关灯与空调
+      description: 分离的关闭逻辑。
+      icon: mdi:power-sleep
+      collapsed: true
+      input:
+        off_delay:
+          name: ⏳ 关灯延时 (短)
+          description: 区域无人多久后关灯（建议 1-2 分钟）。
+          default:
+            seconds: 60
+          selector:
+            duration: {}
+        light_target_off:
+          name: 关灯目标 (可选)
+          description: |
+            若留空，默认关闭 **日常主灯 + 夜间专用灯**。
+            若选择，则只关闭选中的设备。
+          selector:
+            target:
+              entity:
+                domain: light
+          default: ''
+        shutdown_entities:
+          name: 🔌 随动关闭设备 (可选)
+          description: 关灯时同时关闭的设备（如电视）。
+          default: {}
+          selector:
+            target:
+              entity:
+                domain:
+                - switch
+                - media_player
+                - light
+                - fan
+                - cover
+        related_presence_entities:
+          name: 🔗 关联区域人体传感器
+          description: 若这些区域有人，本区域【不关灯】。
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+              - domain: binary_sensor
+                device_class:
+                - motion
+                - occupancy
+                - presence
+        hvac_target:
+          name: 空调设备
+          default: ''
+          selector:
+            entity:
+              filter:
+              - domain: climate
+        hvac_off_delay:
+          name: ⏳ 关空调延时 (长)
+          description: 区域无人多久后关空调（建议 20-30 分钟）。
+          default:
+            minutes: 20
+          selector:
+            duration: {}
+        hvac_area_presence_entities:
+          name: 🔗 空调保持区域 (关联传感器)
+          description: 若这些区域有人，【不关空调】。
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+              - domain: binary_sensor
+                device_class:
+                - motion
+                - occupancy
+                - presence
+    section_global:
+      name: 屏蔽与例外
+      description: 防止自动运行的条件。
+      icon: mdi:cancel
+      collapsed: true
+      input:
+        area_light_entities:
+          name: 状态屏蔽灯组
+          description: 若这些灯已亮着，认为用户手动控制，【不开灯】。
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+              - domain: light
+        night_mode_entities:
+          name: 全局睡眠/免打扰模式
+          description: 任意实体为 ON 时，暂停整个自动化（不开也不关）。
+          selector:
+            entity:
+              multiple: true
+              filter:
+              - domain: input_boolean
+  source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E6%9A%82%E7%95%99%E5%8C%BA%E5%9F%9F%E6%99%BA%E8%83%BD%E6%8E%A7%E5%88%B6.yaml
+triggers:
+- trigger: state
+  entity_id: !input 'presence_sensor'
+  from: 'off'
+  to: 'on'
+  id: presence_on
+- trigger: state
+  entity_id: !input 'secondary_presence_sensor'
+  from: 'off'
+  to: 'on'
+  id: presence_on
+- trigger: state
+  entity_id: !input 'presence_sensor'
+  from: 'on'
+  to: 'off'
+  for: !input 'off_delay'
+  id: presence_off_lights
+- trigger: state
+  entity_id: !input 'presence_sensor'
+  from: 'on'
+  to: 'off'
+  for: !input 'hvac_off_delay'
+  id: presence_off_hvac
+actions:
+- variables:
+    day_lights: !input 'light_target'
+    night_lights_input: !input 'night_light_target'
+    night_lights: |
+      {% if night_lights_input == {} or night_lights_input == none or night_lights_input == "" %}
+        {{ day_lights }}
+      {% else %}
+        {{ night_lights_input }}
+      {% endif %}
+    custom_off_lights: !input 'light_target_off'
+    area_lights: !input 'area_light_entities'
+    area_block: |
+      {% set ls = expand(area_lights) %} {{ ls | selectattr('state','eq','on') | list | count > 0 }}
+    night_modes: !input 'night_mode_entities'
+    night_block: |
+      {% set modes = expand(night_modes) %} {{ modes | selectattr('state','eq','on') | list | count > 0 }}
+    interfering_lights_input: !input 'interfering_lights'
+    is_interfered: |
+      {% set lights = expand(interfering_lights_input) %} {{ lights | selectattr('state','eq','on') | list | count > 0 }}
+    t_after: !input 'night_time_after'
+    t_before: !input 'night_time_before'
+    is_night_time: "{{ now().time() >= strptime(t_after, \"%H:%M:%S\").time() or \n   now().time() <= strptime(t_before, \"\
+      %H:%M:%S\").time() }}\n"
+    related_presences: !input 'related_presence_entities'
+    related_block: |
+      {% set ps = expand(related_presences) %} {{ ps | selectattr('state','eq','on') | list | count > 0 }}
+    hvac_area_presences: !input 'hvac_area_presence_entities'
+    hvac_block: |
+      {% set ps = expand(hvac_area_presences) %} {{ ps | selectattr('state','eq','on') | list | count > 0 }}
+    hvac_target_entity: !input 'hvac_target'
+    shutdown_entities_target: !input 'shutdown_entities'
+- choose:
+  - conditions:
+    - condition: trigger
+      id: presence_on
+    - condition: template
+      value_template: '{{ not night_block and not area_block }}'
+    sequence:
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: '{{ is_night_time }}'
+        sequence:
+        - action: light.turn_on
+          target: '{{ night_lights }}'
+          data:
+            brightness_pct: !input 'night_brightness'
+            color_temp_kelvin: !input 'night_kelvin'
+      - conditions:
+        - condition: or
+          conditions:
+          - condition: numeric_state
+            entity_id: !input 'illuminance_sensor'
+            below: !input 'lux_threshold'
+          - condition: and
+            conditions:
+            - condition: template
+              value_template: '{{ enable_sunset }}'
+            - condition: sun
+              after: sunset
+          - condition: template
+            value_template: '{{ is_interfered }}'
+        sequence:
+        - action: light.turn_on
+          target: '{{ day_lights }}'
+          data:
+            brightness_pct: !input 'brightness_setting'
+            color_temp_kelvin: !input 'color_temp_setting'
+  - conditions:
+    - condition: trigger
+      id: presence_off_lights
+    - condition: template
+      value_template: '{{ not night_block and not related_block }}'
+    sequence:
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: '{{ custom_off_lights != '''' and custom_off_lights != {} }}'
+        sequence:
+        - action: light.turn_off
+          target: '{{ custom_off_lights }}'
+      default:
+      - action: light.turn_off
+        target: '{{ day_lights }}'
+      - if:
+        - condition: template
+          value_template: '{{ night_lights != day_lights }}'
+        then:
+        - action: light.turn_off
+          target: '{{ night_lights }}'
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: '{{ shutdown_entities_target | length > 0 }}'
+        sequence:
+        - action: homeassistant.turn_off
+          target: !input 'shutdown_entities'
+  - conditions:
+    - condition: trigger
+      id: presence_off_hvac
+    - condition: template
+      value_template: '{{ hvac_target_entity != '''' and not hvac_block }}'
+    sequence:
+    - action: climate.turn_off
+      target:
+        entity_id: '{{ hvac_target_entity }}'
+mode: restart
+max_exceeded: silent

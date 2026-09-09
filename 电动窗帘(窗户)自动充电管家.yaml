@@ -9,6 +9,7 @@ blueprint:
     3. **超时保护**：时间过长 -> 强制关闭 -> 调用脚本通知 (Warning级别)。
 
   domain: automation
+  source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E7%94%B5%E5%8A%A8%E7%AA%97%E5%B8%98(%E7%AA%97%E6%88%B7)%E8%87%AA%E5%8A%A8%E5%85%85%E7%94%B5%E7%AE%A1%E5%AE%B6.yaml
   input:
     battery_sensor:
       name: 电池电量传感器

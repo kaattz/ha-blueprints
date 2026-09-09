@@ -10,6 +10,7 @@ blueprint:
     * 🛡️ **误触保护**：结合床压力、卫浴传感器，防止误关灯。
 
   domain: automation
+  source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E5%8D%A7%E5%AE%A4%E6%99%BA%E8%83%BD%E6%8E%A7%E5%88%B6.yaml
   input:
     # ==========================
     # 分组 1: 核心传感器与模式
