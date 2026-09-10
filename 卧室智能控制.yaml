@@ -31,7 +31,7 @@ blueprint:
               multiple: false
         inp_beds:
           name: 床铺压力/存在传感器 (可选)
-          description: 只要其中一个为ON，就不会关灯
+          description: 只要其中一个为ON，就不打开普通进房灯，也不会因主人体无人而关灯
           default: []
           selector:
             entity:
@@ -59,6 +59,45 @@ blueprint:
               domain:
               - input_boolean
               reorder: false
+    section_entry_detection:
+      name: 进房判定
+      description: 使用可选的门口人体和门磁确认室内人体属于真实进房；条件满足后立即开灯
+      icon: mdi:door-open
+      input:
+        inp_entrance_motion:
+          name: 门口人体/红外 (可选)
+          default: []
+          selector:
+            entity:
+              domain:
+              - binary_sensor
+              device_class:
+              - motion
+              - occupancy
+              - presence
+              multiple: true
+              reorder: false
+        inp_door:
+          name: 卧室门磁 (可选)
+          default: []
+          selector:
+            entity:
+              domain:
+              - binary_sensor
+              device_class:
+              - door
+              multiple: true
+              reorder: false
+        inp_entry_timeout:
+          name: 进房信号关联窗口 (秒)
+          description: 门口人体、门磁和室内人体在该时间范围内发生，视为同一次进房；条件满足后立即开灯，不等待该时长结束
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 60
+              mode: slider
+              step: 1
     section_entry:
       name: 进房灯光设置
       description: 正常状态下进门的开灯设置
@@ -126,39 +165,9 @@ blueprint:
             boolean: {}
     section_night:
       name: 夜灯模式 (确认进房)
-      description: 仅在睡眠模式和夜间窗口内有效，需配合门口红外与室内人体连续触发
+      description: 仅在睡眠模式和夜间窗口内有效，使用“进房判定”分组确认真实进房
       icon: mdi:weather-night
       input:
-        inp_door:
-          name: 卧室门磁 (兼容保留)
-          description: 仅作辅助输入，门磁变化不会单独触发灯光
-          default: []
-          selector:
-            entity:
-              domain:
-              - binary_sensor
-              device_class:
-              - door
-              multiple: true
-              reorder: false
-        inp_entrance_motion:
-          name: 门外人体传感器 (可选)
-          default: []
-          selector:
-            entity:
-              domain:
-              - binary_sensor
-              multiple: true
-              reorder: false
-        inp_entry_timeout:
-          name: 进门判定时间 (秒)
-          default: 10
-          selector:
-            number:
-              min: 1
-              max: 60
-              mode: slider
-              step: 1
         inp_night_start_time:
           name: 夜灯开始时间
           description: 夜灯分支只在该时间之后生效
@@ -253,13 +262,6 @@ trigger:
     to: "on"
     id: t_enter
 
-  # 门被打开
-  - platform: state
-    entity_id: !input inp_door
-    from: "off"
-    to: "on"
-    id: t_door
-
   # 人走超时 (灯)
   - platform: state
     entity_id: !input inp_bed_presence
@@ -300,11 +302,15 @@ action:
       night_start_text: !input inp_night_start_time
       night_end_text: !input inp_night_end_time
 
-      # 床铺或套房有人：即使主卧人体误报 off，也不能视为空房
+      # 床铺和套房占用分别计算：床铺阻止普通进房灯，套房只参与离房保护
+      bed_occupied: >
+        {{ expand(v_beds) | selectattr('state','eq','on') | list | count > 0 }}
+
+      suite_occupied: >
+        {{ expand(v_suite) | selectattr('state','eq','on') | list | count > 0 }}
+
       occupied_without_main: >
-        {% set bed_pressure = expand(v_beds) | selectattr('state','eq','on') | list | count > 0 %}
-        {% set suite_area = expand(v_suite) | selectattr('state','eq','on') | list | count > 0 %}
-        {{ bed_pressure or suite_area }}
+        {{ bed_occupied or suite_occupied }}
 
       # 逻辑计算：是否有人
       is_occupied: >
@@ -318,21 +324,6 @@ action:
       # 逻辑计算：灯是否已经亮着
       lights_on: >
         {{ expand(v_any_light) | selectattr('state','eq','on') | list | count > 0 }}
-
-      # 逻辑计算：判断门外刚才是否有人
-      valid_entry_motion: >
-        {% set motion_list = expand(v_motion_outside_list) %}
-        {% if motion_list | count == 0 %}
-          false
-        {% else %}
-          {% set recent = namespace(found=false) %}
-          {% for entity in motion_list %}
-            {% if (as_timestamp(now()) - as_timestamp(entity.last_changed)) < v_timeout %}
-               {% set recent.found = true %}
-            {% endif %}
-          {% endfor %}
-          {{ recent.found }}
-        {% endif %}
 
       # 夜灯只在配置的夜间窗口内生效，开始时间晚于结束时间时跨午夜
       is_night_window: >
@@ -349,64 +340,97 @@ action:
 
   - choose:
       # --------------------------------------------------
-      # 场景 1: 正常进房开灯
+      # 场景 1: 真实进房后按可用入口传感器确认，再选择普通灯或夜灯
       # --------------------------------------------------
       - conditions:
           - condition: trigger
             id: t_enter
-          - condition: template
-            value_template: "{{ not is_sleeping }}"
-          - condition: template
-            value_template: "{{ not occupied_without_main }}"
-          - condition: template
-            value_template: "{{ valid_entry_motion }}"
-          - condition: template
-            value_template: "{{ not lights_on }}"
-          # 光照条件
-          - condition: or
-            conditions:
-              - condition: template
-                value_template: >
-                  {% set lux_s = expand(v_lux_list) | first %}
-                  {% if lux_s %}
-                    {{ lux_s.state | float(0) < v_lux_limit }}
-                  {% else %}
-                    true 
-                  {% endif %}
-              - condition: and
-                conditions:
+        sequence:
+          # 信号已满足时立即通过，室内人体先触发时最多等待关联窗口。
+          - wait_template: >
+              {% set has_motion = v_motion_outside_list not in [none, [], ""] %}
+              {% set has_door = v_door_list not in [none, [], ""] %}
+              {% set motion = namespace(recent=false) %}
+              {% set door = namespace(recent=false) %}
+              {% for entity in expand(v_motion_outside_list) %}
+                {% set age = as_timestamp(now()) - as_timestamp(entity.last_changed) %}
+                {% if entity.state not in ['unknown', 'unavailable'] and 0 <= age <= (v_timeout | float) %}
+                  {% set motion.recent = true %}
+                {% endif %}
+              {% endfor %}
+              {% for entity in expand(v_door_list) %}
+                {% set age = as_timestamp(now()) - as_timestamp(entity.last_changed) %}
+                {% if entity.state not in ['unknown', 'unavailable'] and 0 <= age <= (v_timeout | float) %}
+                  {% set door.recent = true %}
+                {% endif %}
+              {% endfor %}
+              {% if not is_state(v_bed_sensor, 'on') %}
+                true
+              {% elif has_motion and has_door %}
+                {{ motion.recent and door.recent }}
+              {% elif has_motion %}
+                {{ motion.recent }}
+              {% elif has_door %}
+                {{ door.recent }}
+              {% else %}
+                true
+              {% endif %}
+            timeout:
+              seconds: !input inp_entry_timeout
+            continue_on_timeout: false
+
+          # 等待期间室内人体离开则停止，不执行任何开灯分支。
+          - condition: state
+            entity_id: !input inp_bed_presence
+            state: "on"
+
+          - choose:
+              # 正常进房开灯：床上有人时不打开普通灯，主卫有人不阻止。
+              - conditions:
                   - condition: template
-                    value_template: "{{ v_sunset_enable }}"
-                  - condition: sun
-                    after: sunset
-        sequence:
-          - action: light.turn_on
-            target: !input inp_entry_lights
-            data:
-              brightness_pct: !input inp_entry_brightness
-              color_temp_kelvin: !input inp_entry_kelvin
+                    value_template: "{{ not is_sleeping }}"
+                  - condition: template
+                    value_template: "{{ not bed_occupied }}"
+                  - condition: template
+                    value_template: "{{ not lights_on }}"
+                  - condition: or
+                    conditions:
+                      - condition: template
+                        value_template: >
+                          {% set lux_s = expand(v_lux_list) | first %}
+                          {% if lux_s %}
+                            {{ lux_s.state | float(0) < v_lux_limit }}
+                          {% else %}
+                            true
+                          {% endif %}
+                      - condition: and
+                        conditions:
+                          - condition: template
+                            value_template: "{{ v_sunset_enable }}"
+                          - condition: sun
+                            after: sunset
+                sequence:
+                  - action: light.turn_on
+                    target: !input inp_entry_lights
+                    data:
+                      brightness_pct: !input inp_entry_brightness
+                      color_temp_kelvin: !input inp_entry_kelvin
+
+              # 睡眠中保留低亮夜灯；床压允许为 on。
+              - conditions:
+                  - condition: template
+                    value_template: "{{ is_sleeping }}"
+                  - condition: template
+                    value_template: "{{ is_night_window }}"
+                sequence:
+                  - action: light.turn_on
+                    target: !input inp_night_lights
+                    data:
+                      brightness_pct: !input inp_night_brightness
+                      color_temp_kelvin: !input inp_night_kelvin
 
       # --------------------------------------------------
-      # 场景 2: 睡眠中夜灯模式
-      # --------------------------------------------------
-      - conditions:
-          - condition: trigger
-            id: t_enter
-          - condition: template
-            value_template: "{{ is_sleeping }}"
-          - condition: template
-            value_template: "{{ is_night_window }}"
-          - condition: template
-            value_template: "{{ valid_entry_motion }}"
-        sequence:
-          - action: light.turn_on
-            target: !input inp_night_lights
-            data:
-              brightness_pct: !input inp_night_brightness
-              color_temp_kelvin: !input inp_night_kelvin
-
-      # --------------------------------------------------
-      # 场景 3: 延时关灯和设备
+      # 场景 2: 延时关灯和设备（不经过进房等待）
       # --------------------------------------------------
       - conditions:
           - condition: trigger
@@ -420,7 +444,7 @@ action:
             target: !input inp_shutdown_devices
 
       # --------------------------------------------------
-      # 场景 4: 延时关空调
+      # 场景 3: 延时关空调（不经过进房等待）
       # --------------------------------------------------
       - conditions:
           - condition: trigger

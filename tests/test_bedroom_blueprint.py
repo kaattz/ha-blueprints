@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import yaml
@@ -34,6 +34,69 @@ def condition_templates(branch: dict) -> set[str]:
     }
 
 
+class FakeState:
+    def __init__(self, state: str, last_changed: datetime) -> None:
+        self.state = state
+        self.last_changed = last_changed
+
+
+def render_entry_evidence(
+    *,
+    motion_age: int | None = None,
+    door_age: int | None = None,
+    indoor_state: str = "on",
+    motion_state: str = "off",
+    door_state: str = "off",
+) -> bool:
+    document = load_blueprint()
+    outer_branches = next(action["choose"] for action in document["action"] if "choose" in action)
+    entry_sequence = outer_branches[0]["sequence"]
+    wait_action = next(action for action in entry_sequence if "wait_template" in action)
+    now_value = datetime(2026, 9, 10, 18, 0, 0)
+    states = {
+        "binary_sensor.indoor": FakeState(indoor_state, now_value - timedelta(seconds=1)),
+    }
+    motion_entities: list[str] = []
+    door_entities: list[str] = []
+
+    if motion_age is not None:
+        motion_entities = ["binary_sensor.entry_motion"]
+        states[motion_entities[0]] = FakeState(
+            motion_state, now_value - timedelta(seconds=motion_age)
+        )
+    if door_age is not None:
+        door_entities = ["binary_sensor.door"]
+        states[door_entities[0]] = FakeState(
+            door_state, now_value - timedelta(seconds=door_age)
+        )
+
+    def expand(entity_ids: list[str]) -> list[FakeState]:
+        return [states[entity_id] for entity_id in entity_ids if entity_id in states]
+
+    environment = Environment()
+    environment.filters["bool"] = lambda value, _default=False: str(value).strip().lower() in {
+        "1",
+        "true",
+        "on",
+        "yes",
+    }
+    environment.globals.update(
+        now=lambda: now_value,
+        as_timestamp=lambda value: value.timestamp(),
+        expand=expand,
+        is_state=lambda entity_id, state: states[entity_id].state == state,
+        states=states,
+    )
+    context: dict[str, object] = {
+        "v_bed_sensor": "binary_sensor.indoor",
+        "v_motion_outside_list": motion_entities,
+        "v_door_list": door_entities,
+        "v_timeout": 10,
+    }
+    rendered = environment.from_string(wait_action["wait_template"]).render(**context)
+    return bool(yaml.safe_load(rendered))
+
+
 def test_night_window_inputs_are_optional_and_cross_midnight() -> None:
     document = load_blueprint()
     inputs = document["blueprint"]["input"]["section_night"]["input"]
@@ -61,39 +124,96 @@ def test_night_window_inputs_are_optional_and_cross_midnight() -> None:
     assert render(datetime(2026, 9, 10, 7, 0, 0)) is False
 
 
-def test_entry_branches_require_real_entry_and_protect_existing_occupants() -> None:
+def test_entry_detection_inputs_have_their_own_section() -> None:
+    document = load_blueprint()
+    inputs = document["blueprint"]["input"]
+    entry_inputs = inputs["section_entry_detection"]["input"]
+
+    assert set(entry_inputs) == {"inp_door", "inp_entrance_motion", "inp_entry_timeout"}
+    assert entry_inputs["inp_entry_timeout"]["name"] == "进房信号关联窗口 (秒)"
+    assert entry_inputs["inp_entry_timeout"]["default"] == 10
+    assert "inp_door" not in inputs["section_night"]["input"]
+    assert "inp_entrance_motion" not in inputs["section_night"]["input"]
+
+
+def test_entry_evidence_degrades_by_configured_sensors() -> None:
+    assert render_entry_evidence(motion_age=2, door_age=3) is True
+    assert render_entry_evidence(motion_age=2) is True
+    assert render_entry_evidence(door_age=3) is True
+    assert render_entry_evidence() is True
+
+    assert render_entry_evidence(motion_age=11, door_age=3) is False
+    assert render_entry_evidence(motion_age=2, door_age=11) is False
+
+
+def test_only_real_indoor_off_to_on_starts_entry_detection() -> None:
+    document = load_blueprint()
+    triggers = {trigger["id"]: trigger for trigger in document["trigger"]}
+
+    assert triggers["t_enter"]["from"] == "off"
+    assert triggers["t_enter"]["to"] == "on"
+    assert "t_door" not in triggers
+    assert "t_entry_motion" not in triggers
+
+    outer_branches = next(action["choose"] for action in document["action"] if "choose" in action)
+    entry_branch = outer_branches[0]
+    assert entry_branch["conditions"] == [{"condition": "trigger", "id": "t_enter"}]
+    wait_action = next(action for action in entry_branch["sequence"] if "wait_template" in action)
+    assert wait_action["timeout"]["seconds"] == {"__input__": "inp_entry_timeout"}
+    assert wait_action["continue_on_timeout"] is False
+    assert render_entry_evidence(indoor_state="off", motion_age=2, door_age=3) is True
+    assert render_entry_evidence(motion_age=2, motion_state="unavailable") is False
+
+
+def test_entry_branches_block_normal_light_for_bed_occupancy_only() -> None:
     document = load_blueprint()
     variables = document["action"][0]["variables"]
-    branches = document["action"][1]["choose"]
-    normal_branch = branches[0]
-    night_branch = branches[1]
+    outer_branches = next(action["choose"] for action in document["action"] if "choose" in action)
+    entry_sequence = outer_branches[0]["sequence"]
+    entry_mode_branches = next(action["choose"] for action in entry_sequence if "choose" in action)
+    normal_branch = entry_mode_branches[0]
+    night_branch = entry_mode_branches[1]
 
-    assert "occupied_without_main" in variables
+    assert "bed_occupied" in variables
+    assert "suite_occupied" in variables
+    assert "valid_entry" not in variables
     assert "is_night_window" in variables
 
     normal_templates = condition_templates(normal_branch)
     assert "{{ not is_sleeping }}" in normal_templates
-    assert "{{ not occupied_without_main }}" in normal_templates
-    assert "{{ valid_entry_motion }}" in normal_templates
+    assert "{{ not bed_occupied }}" in normal_templates
+    assert "{{ not occupied_without_main }}" not in normal_templates
+    assert "{{ valid_entry }}" not in normal_templates
 
     night_templates = condition_templates(night_branch)
     assert "{{ is_sleeping }}" in night_templates
     assert "{{ is_night_window }}" in night_templates
-    assert "{{ valid_entry_motion }}" in night_templates
+    assert "{{ valid_entry }}" not in night_templates
+    assert "{{ not bed_occupied }}" not in night_templates
 
-    normal_trigger = next(
-        condition for condition in normal_branch["conditions"] if condition.get("condition") == "trigger"
-    )
-    night_trigger = next(
-        condition for condition in night_branch["conditions"] if condition.get("condition") == "trigger"
-    )
-    assert normal_trigger["id"] == "t_enter"
-    assert night_trigger["id"] == "t_enter"
+    assert all(condition.get("condition") != "trigger" for condition in normal_branch["conditions"])
+    assert all(condition.get("condition") != "trigger" for condition in night_branch["conditions"])
 
-    branch_trigger_ids = {
-        condition["id"]
-        for branch in branches
-        for condition in branch["conditions"]
-        if condition.get("condition") == "trigger"
+    wait_index = next(index for index, action in enumerate(entry_sequence) if "wait_template" in action)
+    assert entry_sequence[wait_index + 1] == {
+        "condition": "state",
+        "entity_id": {"__input__": "inp_bed_presence"},
+        "state": "on",
     }
-    assert "t_door" not in branch_trigger_ids
+
+
+def test_shutdown_branches_bypass_entry_evidence_wait() -> None:
+    document = load_blueprint()
+    outer_branches = next(action["choose"] for action in document["action"] if "choose" in action)
+
+    trigger_ids = [
+        next(
+            condition["id"]
+            for condition in branch["conditions"]
+            if condition.get("condition") == "trigger"
+        )
+        for branch in outer_branches
+    ]
+    assert trigger_ids == ["t_enter", "t_lightoff", "t_ac"]
+    for branch in outer_branches[1:]:
+        assert all("wait_template" not in action for action in branch["sequence"])
