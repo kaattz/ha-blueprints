@@ -4,6 +4,7 @@ blueprint:
     通用逻辑：当检测到“所有在家的人”都“躺在床上”时，且公区无人，自动关闭设备。
     该蓝图适用于家庭成员较多的场景，支持最多4人配置。
     支持防抖动机制：当所有人在床后，等待一段时间（例如3分钟），如果期间有人下床，则取消关闭操作，避免误关。
+    仅在配置的允许关闭时间段内执行，默认 20:00 至次日 07:00。
     若确认时间结束后公区仍有人，则继续等待公区恢复无人，但不超过下一个配置的截止时间。
 
   domain: automation
@@ -39,9 +40,15 @@ blueprint:
                 - occupancy
                 - presence
               reorder: false
+        shutdown_window_start:
+          name: 允许关闭开始时间
+          description: 仅从该时间开始允许执行全员就寝关闭；与截止时间组合后可跨午夜。
+          default: "20:00:00"
+          selector:
+            time: {}
         public_area_wait_deadline:
-          name: 公区等待截止时间
-          description: 全员就寝后，公区一直有人时最多等待到几点；到点取消本轮关闭。
+          name: 允许关闭结束时间（公区等待截止时间）
+          description: 到达该时间后不再执行关闭；若公区一直有人，也会在此时取消本轮关闭。
           default: "07:00:00"
           selector:
             time: {}
@@ -227,6 +234,11 @@ action:
   # 取消触发只负责打断旧执行，不进入关闭流程。
   - condition: trigger
     id: all_in_bed_true
+
+  # 仅允许在配置的时间窗内执行；开始时间晚于结束时间时自动按跨午夜处理。
+  - condition: time
+    after: !input shutdown_window_start
+    before: !input public_area_wait_deadline
 
   # 将本轮截止时间固定为下一个配置时刻，避免跨午夜计算错误。
   - variables:
