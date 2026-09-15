@@ -146,7 +146,7 @@ def test_entry_evidence_degrades_by_configured_sensors() -> None:
     assert render_entry_evidence(motion_age=2, door_age=11) is False
 
 
-def test_only_real_indoor_off_to_on_starts_entry_detection() -> None:
+def test_only_real_indoor_off_to_on_starts_ordinary_entry_detection() -> None:
     document = load_blueprint()
     triggers = {trigger["id"]: trigger for trigger in document["trigger"]}
 
@@ -193,6 +193,7 @@ def test_entry_branches_block_normal_light_for_bed_occupancy_only() -> None:
 
     assert all(condition.get("condition") != "trigger" for condition in normal_branch["conditions"])
     assert all(condition.get("condition") != "trigger" for condition in night_branch["conditions"])
+    assert "{{ v_sleep_entry_mode != 'parallel' }}" in night_templates
 
     wait_index = next(index for index, action in enumerate(entry_sequence) if "wait_template" in action)
     assert entry_sequence[wait_index + 1] == {
@@ -214,6 +215,101 @@ def test_shutdown_branches_bypass_entry_evidence_wait() -> None:
         )
         for branch in outer_branches
     ]
-    assert trigger_ids == ["t_enter", "t_lightoff", "t_ac"]
-    for branch in outer_branches[1:]:
+    assert trigger_ids == ["t_enter", "t_sleep_motion", "t_lightoff", "t_ac"]
+    for branch in outer_branches[2:]:
         assert all("wait_template" not in action for action in branch["sequence"])
+
+
+def test_sleep_entry_uses_real_motion_then_real_door_without_indoor_edge() -> None:
+    document = load_blueprint()
+    inputs = document["blueprint"]["input"]["section_night"]["input"]
+    assert inputs["inp_sleep_entry_mode"]["default"] == "restart"
+    assert [option["value"] for option in inputs["inp_sleep_entry_mode"]["selector"]["select"]["options"]] == ["restart", "parallel"]
+    assert document["trigger_variables"] == {"sleep_entry_mode": {"__input__": "inp_sleep_entry_mode"}}
+    triggers = {trigger["id"]: trigger for trigger in document["trigger"]}
+    assert triggers["t_enter"]["entity_id"] == {"__input__": "inp_bed_presence"}
+    assert triggers["t_sleep_motion"] == {
+        "platform": "state",
+        "entity_id": {"__input__": "inp_entrance_motion"},
+        "from": "off",
+        "to": "on",
+        "id": "t_sleep_motion",
+        "enabled": "{{ sleep_entry_mode == 'parallel' }}",
+    }
+    assert document["mode"] == {"__input__": "inp_sleep_entry_mode"}
+    assert document["max_exceeded"] == "warning"
+    branches = next(action["choose"] for action in document["action"] if "choose" in action)
+    night_entry = branches[1]
+    assert night_entry["conditions"][0] == {"condition": "trigger", "id": "t_sleep_motion"}
+    assert {"condition": "time", "after": {"__input__": "inp_night_start_time"}, "before": {"__input__": "inp_night_end_time"}} in night_entry["conditions"]
+    assert any("v_sleep_modes" in condition.get("value_template", "") for condition in night_entry["conditions"])
+    assert any("v_any_light" in condition.get("value_template", "") for condition in night_entry["conditions"])
+    assert night_entry["sequence"][0] == {
+        "wait_for_trigger": [
+            {
+                "platform": "state",
+                "entity_id": {"__input__": "inp_door"},
+                "from": "off",
+                "to": "on",
+            }
+        ],
+        "timeout": {"seconds": {"__input__": "inp_entry_timeout"}},
+        "continue_on_timeout": False,
+    }
+    assert night_entry["sequence"][1] == {
+        "condition": "time",
+        "after": {"__input__": "inp_night_start_time"},
+        "before": {"__input__": "inp_night_end_time"},
+    }
+    assert "v_sleep_modes" in night_entry["sequence"][2]["value_template"]
+    assert "is_sleeping" not in night_entry["sequence"][2]["value_template"]
+    assert night_entry["sequence"][-1]["action"] == "light.turn_on"
+    assert night_entry["sequence"][-1]["target"] == {"__input__": "inp_night_lights"}
+
+
+def test_sleep_entry_does_not_replace_manual_brightness_or_fail_open() -> None:
+    document = load_blueprint()
+    branches = next(action["choose"] for action in document["action"] if "choose" in action)
+    sequence = branches[1]["sequence"]
+    template = sequence[3]["value_template"]
+    now_value = datetime(2026, 9, 15, 0, 0, 51)
+    state_values = {
+        "binary_sensor.light_status": FakeState("off", now_value),
+    }
+    environment = Environment()
+    environment.globals["expand"] = lambda ids: [state_values[name] for name in ids if name in state_values]
+
+    def allowed(status):
+        if status is None:
+            state_values.pop("binary_sensor.light_status", None)
+        else:
+            state_values["binary_sensor.light_status"] = FakeState(status, now_value)
+        rendered = environment.from_string(template).render(v_any_light=["binary_sensor.light_status"])
+        return bool(yaml.safe_load(rendered))
+
+    assert allowed("off") is True
+    assert allowed("on") is False
+    assert allowed("unavailable") is False
+    assert allowed(None) is False
+    empty_rendered = environment.from_string(template).render(v_any_light=[])
+    assert bool(yaml.safe_load(empty_rendered)) is False
+
+
+def test_parallel_shutdown_rechecks_live_presence_before_turning_off() -> None:
+    document = load_blueprint()
+    branches = next(action["choose"] for action in document["action"] if "choose" in action)
+    shutdown = branches[2]["sequence"]
+    assert shutdown[0] == {
+        "condition": "state",
+        "entity_id": {"__input__": "inp_bed_presence"},
+        "state": "off",
+    }
+    assert shutdown[1]["action"] == "light.turn_off"
+
+    ac_shutdown = branches[3]["sequence"]
+    assert ac_shutdown[0] == {
+        "condition": "state",
+        "entity_id": {"__input__": "inp_bed_presence"},
+        "state": "off",
+    }
+    assert ac_shutdown[1]["action"] == "climate.turn_off"

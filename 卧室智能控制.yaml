@@ -5,7 +5,7 @@ blueprint:
 
     **核心功能：**
     * 💡 **进门开灯**：支持自定义亮度与色温。
-    * 🌙 **夜灯模式**：睡眠期间他人进入，只开微弱夜灯。
+    * 🌙 **夜灯模式**：睡眠期间门口人体触发、随后开门，只开微弱夜灯；室内人体持续为 ON 也能触发。
     * ⏳ **自动关断**：人走后分级延时关灯、关空调。
     * 🛡️ **误触保护**：结合床压力、卫浴传感器，防止误关灯。
 
@@ -168,6 +168,21 @@ blueprint:
       description: 仅在睡眠模式和夜间窗口内有效，使用“进房判定”分组确认真实进房
       icon: mdi:weather-night
       input:
+        inp_sleep_entry_mode:
+          name: 睡眠进屋双信号夜灯
+          description: 选择“开启”后并行处理门口人体和室内人体事件；须配置门口人体、门磁、夜灯目标及已有灯亮检测。原模式保留普通进房和离房行为。
+          default: restart
+          selector:
+            select:
+              multiple: false
+              custom_value: false
+              sort: false
+              options:
+                - label: 不启用（原模式）
+                  value: restart
+                - label: 启用双信号夜灯
+                  value: parallel
+
         inp_night_start_time:
           name: 夜灯开始时间
           description: 夜灯分支只在该时间之后生效
@@ -254,6 +269,9 @@ blueprint:
 # ========================================================
 # 触发器
 # ========================================================
+trigger_variables:
+  sleep_entry_mode: !input inp_sleep_entry_mode
+
 trigger:
   # 人进卧室
   - platform: state
@@ -261,6 +279,14 @@ trigger:
     from: "off"
     to: "on"
     id: t_enter
+
+  # 睡眠时第二人进屋：床上有人使室内人体一直为 on，改由门口人体启动。
+  - platform: state
+    entity_id: !input inp_entrance_motion
+    from: "off"
+    to: "on"
+    id: t_sleep_motion
+    enabled: "{{ sleep_entry_mode == 'parallel' }}"
 
   # 人走超时 (灯)
   - platform: state
@@ -293,6 +319,8 @@ action:
       v_lux_list: !input inp_lux
       v_door_list: !input inp_door
       v_motion_outside_list: !input inp_entrance_motion
+      v_sleep_entry_mode: !input inp_sleep_entry_mode
+      v_night_target: !input inp_night_lights
       v_ac_list: !input inp_ac
 
       # 数值/开关输入映射
@@ -422,6 +450,8 @@ action:
                     value_template: "{{ is_sleeping }}"
                   - condition: template
                     value_template: "{{ is_night_window }}"
+                  - condition: template
+                    value_template: "{{ v_sleep_entry_mode != 'parallel' }}"
                 sequence:
                   - action: light.turn_on
                     target: !input inp_night_lights
@@ -430,7 +460,57 @@ action:
                       color_temp_kelvin: !input inp_night_kelvin
 
       # --------------------------------------------------
-      # 场景 2: 延时关灯和设备（不经过进房等待）
+      # 场景 2: 睡眠进屋双信号夜灯（独立于普通进房和离房）
+      # --------------------------------------------------
+      - conditions:
+          - condition: trigger
+            id: t_sleep_motion
+          - condition: template
+            value_template: "{{ v_sleep_entry_mode == 'parallel' }}"
+          - condition: template
+            value_template: "{{ v_door_list | count > 0 }}"
+          - condition: template
+            value_template: "{{ v_night_target | length > 0 }}"
+          - condition: time
+            after: !input inp_night_start_time
+            before: !input inp_night_end_time
+          - condition: template
+            value_template: "{{ expand(v_sleep_modes) | selectattr('state', 'eq', 'on') | list | count > 0 }}"
+          - condition: template
+            value_template: >-
+              {% set configured = v_any_light | count %}
+              {% set all_states = expand(v_any_light) %}
+              {{ configured > 0 and all_states | count == configured
+                 and (all_states | selectattr('state', 'eq', 'off') | list | count) == configured }}
+        sequence:
+          - wait_for_trigger:
+              - platform: state
+                entity_id: !input inp_door
+                from: "off"
+                to: "on"
+            timeout:
+              seconds: !input inp_entry_timeout
+            continue_on_timeout: false
+          - condition: time
+            after: !input inp_night_start_time
+            before: !input inp_night_end_time
+          # 等待结束后读实时状态；启动时的 is_sleeping/lights_on 已可能过期。
+          - condition: template
+            value_template: "{{ expand(v_sleep_modes) | selectattr('state', 'eq', 'on') | list | count > 0 }}"
+          - condition: template
+            value_template: >-
+              {% set configured = v_any_light | count %}
+              {% set all_states = expand(v_any_light) %}
+              {{ configured > 0 and all_states | count == configured
+                 and (all_states | selectattr('state', 'eq', 'off') | list | count) == configured }}
+          - action: light.turn_on
+            target: !input inp_night_lights
+            data:
+              brightness_pct: !input inp_night_brightness
+              color_temp_kelvin: !input inp_night_kelvin
+
+      # --------------------------------------------------
+      # 场景 3: 延时关灯和设备（不经过进房等待）
       # --------------------------------------------------
       - conditions:
           - condition: trigger
@@ -438,13 +518,16 @@ action:
           - condition: template
             value_template: "{{ not is_occupied }}"
         sequence:
+          - condition: state
+            entity_id: !input inp_bed_presence
+            state: "off"
           - action: light.turn_off
             target: !input inp_off_lights
           - action: homeassistant.turn_off
             target: !input inp_shutdown_devices
 
       # --------------------------------------------------
-      # 场景 3: 延时关空调（不经过进房等待）
+      # 场景 4: 延时关空调（不经过进房等待）
       # --------------------------------------------------
       - conditions:
           - condition: trigger
@@ -452,9 +535,12 @@ action:
           - condition: template
             value_template: "{{ not is_occupied }}"
         sequence:
+          - condition: state
+            entity_id: !input inp_bed_presence
+            state: "off"
           - action: climate.turn_off
             target:
               entity_id: !input inp_ac
 
-mode: restart
-max_exceeded: silent
+mode: !input inp_sleep_entry_mode
+max_exceeded: warning
