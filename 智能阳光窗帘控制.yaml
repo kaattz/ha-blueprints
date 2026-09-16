@@ -16,7 +16,7 @@ blueprint:
     - 如果配置了人体存在传感器，还必须无人达到无人后开帘等待时间
 
     房间无人补关：
-    - 配置人体存在传感器后，房间无人达到无人后关帘等待时间且阳光关闭条件仍成立时，自动关闭窗帘。
+    - 配置人体存在传感器后，房间无人达到无人后关帘等待时间、窗帘处于打开状态且阳光关闭条件仍成立时，自动关闭窗帘。
     - 用于人工开帘后人员离开房间的场景；人在房间内时不会被自动抢回控制权。
 
     说明：
@@ -207,6 +207,7 @@ trigger_variables:
   lux_limit: !input lux_threshold
   lux_threshold_helper_entity: !input lux_threshold_helper
   presence_entity: !input presence_sensor
+  target_curtains_entity: !input target_curtains
 
 variables:
   lux_sensor_entity: !input lux_sensor
@@ -334,10 +335,12 @@ trigger:
       {% set helper_lux = helper_raw | float(0) %}
       {% set helper_valid = helper_raw not in ['unknown', 'unavailable', 'none', ''] and is_number(helper_raw) and 1000 <= helper_lux <= 50000 %}
       {% set effective_lux_limit = helper_lux if helper_valid else (lux_limit | float(0)) %}
+      {% set target_covers = target_curtains_entity.entity_id | default([]) %}
 
       {{
         presence_entity not in [none, '', []]
         and is_state(presence_entity, 'off')
+        and expand(target_covers) | selectattr('state', 'in', ['open', 'opening']) | list | count > 0
         and lux_valid
         and sun_hits_window
         and el > dynamic_min

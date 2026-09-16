@@ -55,6 +55,16 @@ def test_presence_gone_close_trigger_requires_sun_condition() -> None:
     assert "lux > effective_lux_limit" in template
     assert "el > dynamic_min" in template
     assert "el < dynamic_max" in template
+    assert "selectattr('state', 'in', ['open', 'opening'])" in template
+
+
+def test_presence_gone_close_trigger_rearms_when_curtain_opens() -> None:
+    document = load_blueprint()
+    template = trigger_by_id(document, "person_gone_close_wait")["value_template"]
+    trigger_variables = document["trigger_variables"]
+
+    assert "target_curtains_entity" in trigger_variables
+    assert "expand(target_covers)" in template
 
 
 def test_presence_gone_close_branch_only_closes() -> None:
