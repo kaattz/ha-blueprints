@@ -13,10 +13,10 @@ blueprint:
     - 关闭条件不再满足
     - 光照已经低于阈值
     - 持续达到无阳光等待时间
-    - 如果配置了人体存在传感器，还必须无人达到等待时间
+    - 如果配置了人体存在传感器，还必须无人达到无人后开帘等待时间
 
     房间无人补关：
-    - 配置人体存在传感器后，房间无人达到等待时间且阳光关闭条件仍成立时，自动关闭窗帘。
+    - 配置人体存在传感器后，房间无人达到无人后关帘等待时间且阳光关闭条件仍成立时，自动关闭窗帘。
     - 用于人工开帘后人员离开房间的场景；人在房间内时不会被自动抢回控制权。
 
     说明：
@@ -32,6 +32,7 @@ blueprint:
       lux_threshold: 4000
       no_sun_duration: 10
       no_presence_duration: 30
+      no_presence_close_duration: 10
 
   domain: automation
   source_url: https://github.com/kaattz/ha-blueprints/blob/main/%E6%99%BA%E8%83%BD%E9%98%B3%E5%85%89%E7%AA%97%E5%B8%98%E6%8E%A7%E5%88%B6.yaml
@@ -164,8 +165,18 @@ blueprint:
           step: 1
           mode: slider
     no_presence_duration:
-      name: 无人等待时间（分钟）
+      name: 无人后开帘等待时间（分钟）
       default: 30
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: minutes
+          step: 1
+          mode: slider
+    no_presence_close_duration:
+      name: 无人后关帘等待时间（分钟）
+      default: 10
       selector:
         number:
           min: 0
@@ -297,6 +308,46 @@ trigger:
       minutes: !input no_sun_duration
 
   - platform: template
+    id: person_gone_close_wait
+    value_template: >
+      {% set day = now().strftime('%j') | int %}
+      {% set rad = (day + 10) * 2 * 3.1415926 / 365 %}
+      {% set factor = (1 - cos(rad)) / 2 %}
+
+      {% set winter = limit_winter | float(0) %}
+      {% set summer = limit_summer | float(0) %}
+      {% set dynamic_min = winter + (summer - winter) * factor %}
+
+      {% set max_winter = max_limit_winter | float(90) %}
+      {% set max_summer = max_limit_summer | float(55) %}
+      {% set dynamic_max = max_winter + (max_summer - max_winter) * factor %}
+
+      {% set az = state_attr('sun.sun', 'azimuth') | float(0) %}
+      {% set el = state_attr('sun.sun', 'elevation') | float(0) %}
+      {% set az_diff = ((az - (win_az | float(0)) + 540) % 360) - 180 %}
+      {% set sun_hits_window = (az_diff | abs) <= (az_range | float(0)) %}
+
+      {% set lux_raw = states(lux_sensor_entity) %}
+      {% set lux_valid = lux_raw not in ['unknown', 'unavailable', 'none', ''] %}
+      {% set lux = lux_raw | float(0) %}
+      {% set helper_raw = states(lux_threshold_helper_entity) if lux_threshold_helper_entity not in [none, '', []] else '' %}
+      {% set helper_lux = helper_raw | float(0) %}
+      {% set helper_valid = helper_raw not in ['unknown', 'unavailable', 'none', ''] and is_number(helper_raw) and 1000 <= helper_lux <= 50000 %}
+      {% set effective_lux_limit = helper_lux if helper_valid else (lux_limit | float(0)) %}
+
+      {{
+        presence_entity not in [none, '', []]
+        and is_state(presence_entity, 'off')
+        and lux_valid
+        and sun_hits_window
+        and el > dynamic_min
+        and el < dynamic_max
+        and lux > effective_lux_limit
+      }}
+    for:
+      minutes: !input no_presence_close_duration
+
+  - platform: template
     id: person_gone_wait
     value_template: >
       {% if presence_entity in [none, '', []] %}
@@ -331,41 +382,7 @@ action:
 
       - conditions:
           - condition: trigger
-            id: person_gone_wait
-          - condition: template
-            value_template: >
-              {% set day = now().strftime('%j') | int %}
-              {% set rad = (day + 10) * 2 * 3.1415926 / 365 %}
-              {% set factor = (1 - cos(rad)) / 2 %}
-
-              {% set winter = limit_winter | float(0) %}
-              {% set summer = limit_summer | float(0) %}
-              {% set dynamic_min = winter + (summer - winter) * factor %}
-
-              {% set max_winter = max_limit_winter | float(90) %}
-              {% set max_summer = max_limit_summer | float(55) %}
-              {% set dynamic_max = max_winter + (max_summer - max_winter) * factor %}
-
-              {% set az = state_attr('sun.sun', 'azimuth') | float(0) %}
-              {% set el = state_attr('sun.sun', 'elevation') | float(0) %}
-              {% set az_diff = ((az - (win_az | float(0)) + 540) % 360) - 180 %}
-              {% set sun_hits_window = (az_diff | abs) <= (az_range | float(0)) %}
-
-              {% set lux_raw = states(lux_sensor_entity) %}
-              {% set lux_valid = lux_raw not in ['unknown', 'unavailable', 'none', ''] %}
-              {% set lux = lux_raw | float(0) %}
-              {% set helper_raw = states(lux_threshold_helper_entity) if lux_threshold_helper_entity not in [none, '', []] else '' %}
-              {% set helper_lux = helper_raw | float(0) %}
-              {% set helper_valid = helper_raw not in ['unknown', 'unavailable', 'none', ''] and is_number(helper_raw) and 1000 <= helper_lux <= 50000 %}
-              {% set effective_lux_limit = helper_lux if helper_valid else (lux_limit | float(0)) %}
-
-              {{
-                lux_valid
-                and sun_hits_window
-                and el > dynamic_min
-                and el < dynamic_max
-                and lux > effective_lux_limit
-              }}
+            id: person_gone_close_wait
         sequence:
           - action: cover.close_cover
             target: !input target_curtains

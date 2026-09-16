@@ -36,28 +36,34 @@ def action_branch(document: dict, trigger_id: str) -> dict:
     raise AssertionError(f"missing action branch for {trigger_id}")
 
 
-def test_presence_gone_trigger_is_unchanged() -> None:
+def test_presence_close_and_open_have_separate_waits() -> None:
     document = load_blueprint()
-    trigger = trigger_by_id(document, "person_gone_wait")
+    close_trigger = trigger_by_id(document, "person_gone_close_wait")
+    open_trigger = trigger_by_id(document, "person_gone_wait")
 
-    assert trigger["for"] == {"minutes": {"__input__": "no_presence_duration"}}
-    assert "is_state(presence_entity, 'off')" in trigger["value_template"]
+    assert close_trigger["for"] == {"minutes": {"__input__": "no_presence_close_duration"}}
+    assert open_trigger["for"] == {"minutes": {"__input__": "no_presence_duration"}}
+    assert "is_state(presence_entity, 'off')" in close_trigger["value_template"]
+    assert "is_state(presence_entity, 'off')" in open_trigger["value_template"]
 
 
-def test_presence_gone_closes_when_sun_condition_still_holds() -> None:
+def test_presence_gone_close_trigger_requires_sun_condition() -> None:
     document = load_blueprint()
-    branch = action_branch(document, "person_gone_wait")
-    template_conditions = [
-        condition for condition in branch["conditions"] if condition["condition"] == "template"
-    ]
+    template = trigger_by_id(document, "person_gone_close_wait")["value_template"]
 
-    assert len(template_conditions) == 1
-    template = template_conditions[0]["value_template"]
     assert "sun_hits_window" in template
     assert "lux > effective_lux_limit" in template
     assert "el > dynamic_min" in template
     assert "el < dynamic_max" in template
 
+
+def test_presence_gone_close_branch_only_closes() -> None:
+    document = load_blueprint()
+    branch = action_branch(document, "person_gone_close_wait")
+
+    assert branch["conditions"] == [
+        {"condition": "trigger", "id": "person_gone_close_wait"}
+    ]
     assert branch["sequence"] == [
         {
             "action": "cover.close_cover",
@@ -66,11 +72,16 @@ def test_presence_gone_closes_when_sun_condition_still_holds() -> None:
     ]
 
 
-def test_no_new_triggers_were_added() -> None:
+def test_trigger_ids_are_stable() -> None:
     document = load_blueprint()
     ids = [trigger.get("id") for trigger in document["trigger"]]
 
-    assert ids == ["sun_arrived", "sun_gone_wait", "person_gone_wait"]
+    assert ids == [
+        "sun_arrived",
+        "sun_gone_wait",
+        "person_gone_close_wait",
+        "person_gone_wait",
+    ]
 
 
 def test_sun_arrived_close_flow_is_preserved() -> None:
