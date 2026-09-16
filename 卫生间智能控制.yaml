@@ -329,6 +329,12 @@ blueprint:
           default: '22:00:00'
           selector:
             time: {}
+        setting_window_close_end_time:
+          name: 自动关窗时段结束时间
+          description: 自动关窗只在「排气窗定时关闭时间」到次日此时间之间生效；此时段之外手动开窗不会被自动关闭。
+          default: '06:00:00'
+          selector:
+            time: {}
         fresh_air_status:
           name: '[可选] 新风系统'
           default: []
@@ -453,18 +459,25 @@ max_exceeded: silent
 trigger_variables:
   tv_window_auto_close: !input 'setting_window_auto_close'
   tv_window_close_time: !input 'setting_window_close_time'
-  tv_blind_open_time: !input 'setting_blind_open_time'
+  tv_window_close_end_time: !input 'setting_window_close_end_time'
   tv_input_bool_active: !input 'input_bool_active'
   tv_input_bool_post: !input 'input_bool_post'
   tv_cover_window: !input 'cover_window'
 trigger:
 - platform: template
   value_template: |-
-    {% set close_time = today_at(tv_window_close_time) %} {% set open_time = today_at(tv_blind_open_time) %} {% if close_time > open_time %}
-      {% set in_window = now() >= close_time or now() < open_time %}
+    {# 自动关窗时段：当天「排气窗定时关闭时间」到次日「关窗时段结束时间」。 #}
+    {# 时段内才允许自动关窗；早上时段结束后手动开窗不再被关。 #}
+    {% set close_start = today_at(tv_window_close_time) %}
+    {% set close_end = today_at(tv_window_close_end_time) %}
+    {% if close_start == close_end %}
+      {% set in_window = false %}
+    {% elif close_end > close_start %}
+      {% set in_window = close_start <= now() < close_end %}
     {% else %}
-      {% set in_window = now() >= close_time and now() < open_time %}
-    {% endif %} {% set active = expand(tv_input_bool_active) | first %} {% set post = expand(tv_input_bool_post) | first %} {{ tv_window_auto_close and in_window and
+      {% set in_window = now() >= close_start or now() < close_end %}
+    {% endif %}
+    {% set active = expand(tv_input_bool_active) | first %} {% set post = expand(tv_input_bool_post) | first %} {{ tv_window_auto_close and in_window and
        active is not none and post is not none and
        active.state == 'off' and post.state == 'off' and
        states(tv_cover_window) in ['open', 'opening'] }}
