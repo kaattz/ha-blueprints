@@ -13,7 +13,8 @@ blueprint:
          - 智能马桶就座后才换气。
 
     2. **多区域跟随**
-       - 淋浴区、扩展区检测到有人后自动开灯（不依赖主灯是否已开）。
+       - 淋浴区、扩展区检测到有人后自动开灯。
+       - 开灯条件：主灯已开，或光照低于“开灯光照阈值”（黑暗中可自主开灯，不受主灯牵制）。
        - 可受“起床模式”抑制，避免夜间强光。
 
     3. **洗澡模式**
@@ -818,6 +819,17 @@ action:
       - condition: template
         value_template: '{{ expand(var_inputs.input_get_up_mode) | selectattr(''state'', ''eq'', ''on'') | list | count ==
           0 }}'
+      # 子区域补光：主灯已开（跟随已有照明）或 光照低于阈值（黑暗中自主判断）。
+      # 不能只要求主灯已开：主灯被离开逻辑关掉后，这里会永远无法重新开灯。
+      - condition: or
+        conditions:
+        - condition: template
+          value_template: '{{ is_state(var_inputs.light_sink_area.entity_id, ''on'') if var_inputs.light_sink_area.entity_id
+            is string else expand(var_inputs.light_sink_area.entity_id) | selectattr(''state'',''eq'',''on'') | list | count
+            > 0 }}'
+        - condition: numeric_state
+          entity_id: !input 'illuminance_sensor'
+          below: !input 'illuminance_threshold'
       then:
       - if:
         - condition: template
@@ -839,6 +851,17 @@ action:
       - condition: template
         value_template: '{{ expand(var_inputs.input_get_up_mode) | selectattr(''state'', ''eq'', ''on'') | list | count ==
           0 }}'
+      # 子区域补光：主灯已开（跟随已有照明）或 光照低于阈值（黑暗中自主判断）。
+      # 不能只要求主灯已开：主灯被离开逻辑关掉后，这里会永远无法重新开灯。
+      - condition: or
+        conditions:
+        - condition: template
+          value_template: '{{ is_state(var_inputs.light_sink_area.entity_id, ''on'') if var_inputs.light_sink_area.entity_id
+            is string else expand(var_inputs.light_sink_area.entity_id) | selectattr(''state'',''eq'',''on'') | list | count
+            > 0 }}'
+        - condition: numeric_state
+          entity_id: !input 'illuminance_sensor'
+          below: !input 'illuminance_threshold'
       then:
       - if:
         - condition: template
@@ -860,6 +883,17 @@ action:
       - condition: template
         value_template: '{{ expand(var_inputs.input_get_up_mode) | selectattr(''state'', ''eq'', ''on'') | list | count ==
           0 }}'
+      # 子区域补光：主灯已开（跟随已有照明）或 光照低于阈值（黑暗中自主判断）。
+      # 不能只要求主灯已开：主灯被离开逻辑关掉后，这里会永远无法重新开灯。
+      - condition: or
+        conditions:
+        - condition: template
+          value_template: '{{ is_state(var_inputs.light_sink_area.entity_id, ''on'') if var_inputs.light_sink_area.entity_id
+            is string else expand(var_inputs.light_sink_area.entity_id) | selectattr(''state'',''eq'',''on'') | list | count
+            > 0 }}'
+        - condition: numeric_state
+          entity_id: !input 'illuminance_sensor'
+          below: !input 'illuminance_threshold'
       then:
       - if:
         - condition: template

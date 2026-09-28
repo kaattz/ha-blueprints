@@ -443,12 +443,43 @@ def entry_light_templates(trigger_id: str) -> list[str]:
     ]
 
 
+def entry_light_or_block(trigger_id: str) -> dict:
+    """The `or` block gating a follow-zone light (main-light-on OR dark)."""
+    for condition in entry_light_if(trigger_id)["if"]:
+        if condition.get("condition") == "or":
+            return condition
+    raise AssertionError(f"{trigger_id} has no or-block gating its light")
+
+
 def test_follow_branches_can_light_up_on_their_own() -> None:
-    """主灯被关掉后，淋浴区/扩展区再次进人时仍应能自己开灯。"""
+    """主灯被关掉后，淋浴区/扩展区在黑暗中再次进人时仍应能自己开灯。
+
+    事故：21:12:52 主灯被离开逻辑关掉，21:22:19 淋浴区再次进人却无法开灯
+    （当时照度 4.0 lx，远低于阈值 30 lx）。
+    """
     for trigger_id in ("entry_shower", "entry_zone_a", "entry_zone_b"):
-        for template in entry_light_templates(trigger_id):
-            assert "light_sink_area" not in template, (
-                f"{trigger_id} still depends on the main light being on"
+        or_block = entry_light_or_block(trigger_id)
+        conditions = or_block["conditions"]
+
+        templates = [c["value_template"] for c in conditions if c.get("condition") == "template"]
+        numerics = [c for c in conditions if c.get("condition") == "numeric_state"]
+
+        # 一条「跟随已有照明」，一条「黑暗中自主判断」，任一成立即可。
+        assert len(conditions) == 2, (trigger_id, conditions)
+        assert any("light_sink_area" in template for template in templates), trigger_id
+        assert len(numerics) == 1, trigger_id
+        assert numerics[0]["below"] == {"__input__": "illuminance_threshold"}, trigger_id
+        assert numerics[0]["entity_id"] == {"__input__": "illuminance_sensor"}, trigger_id
+
+
+def test_follow_branches_do_not_require_main_light() -> None:
+    """主灯依赖必须是 or 的一个分支，不能是独立的 AND 条件（否则永远开不了灯）。"""
+    for trigger_id in ("entry_shower", "entry_zone_a", "entry_zone_b"):
+        for condition in entry_light_if(trigger_id)["if"]:
+            if condition.get("condition") != "template":
+                continue
+            assert "light_sink_area" not in condition["value_template"], (
+                f"{trigger_id} still hard-requires the main light being on"
             )
 
 
