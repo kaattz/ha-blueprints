@@ -23,6 +23,14 @@ blueprint:
           selector:
             duration:
               enable_second: true
+        cancel_debounce:
+          name: 取消防抖 (Cancel Debounce)
+          description: 全员在床条件失效后，需持续该时长才真正取消本轮等待。用于过滤瞬时抖动（例如传感器短暂不可用），避免正在等待公区清空的一轮被误取消。设为 0 则立即取消。
+          default:
+            minutes: 1
+          selector:
+            duration:
+              enable_second: true
         public_area_sensors:
           name: 公区安全检查 (必选)
           description: '只有当这些区域全部无人时，才会执行关闭。
@@ -229,11 +237,35 @@ trigger:
       {% endfor %}
       {{ not (ns.someone_home and ns.all_in_bed) }}
     id: all_in_bed_false
+    # 防抖：条件失效需持续 cancel_debounce 才真正取消本轮。
+    # 亚秒级抖动（如 KNX 实体瞬时 unavailable）不应吃掉正在等待公区清空的一轮。
+    for: !input cancel_debounce
+
+  # 重启 / 重载对账：模板触发器只在 false→true 的跳变瞬间触发，
+  # 若 HA 重启时条件已成立（跳变发生在停机期间），就永远等不到下一次跳变。
+  # 这两条不依赖跳变，直接在启动/重载后重新入队，再走下方全部安全校验。
+  # 命名与「智能起夜模式」蓝图保持一致。
+  - platform: homeassistant
+    event: start
+    id: ha_start_reconcile
+
+  - platform: event
+    event_type: automation_reloaded
+    id: automation_reload_reconcile
 
 action:
-  # 取消触发只负责打断旧执行，不进入关闭流程。
-  - condition: trigger
-    id: all_in_bed_true
+  # 取消触发 (all_in_bed_false) 只负责打断旧执行，不进入关闭流程。
+  # 对账触发 (ha_start_reconcile / automation_reload_reconcile) 需放行，
+  # 否则重启后重新入队会被这里挡掉，整晚静默的问题依旧存在。
+  # 放行只影响"能否入队"：下方时间窗、确认延迟、在床复检、公区复检全部照旧执行。
+  - condition: or
+    conditions:
+      - condition: trigger
+        id: all_in_bed_true
+      - condition: trigger
+        id: ha_start_reconcile
+      - condition: trigger
+        id: automation_reload_reconcile
 
   # 仅允许在配置的时间窗内执行；开始时间晚于结束时间时自动按跨午夜处理。
   - condition: time
