@@ -13,7 +13,7 @@ blueprint:
          - 智能马桶就座后才换气。
 
     2. **多区域跟随**
-       - 淋浴区、扩展区检测到有人后自动开灯。
+       - 淋浴区、扩展区检测到有人后自动开灯（不依赖主灯是否已开）。
        - 可受“起床模式”抑制，避免夜间强光。
 
     3. **洗澡模式**
@@ -24,6 +24,8 @@ blueprint:
 
     4. **智能离开**
        - 全区域无人后延时关灯。
+       - 关灯前会再次确认仍然无人，且淋浴区没有在放水；否则本轮不关灯，等下次判定。
+       - 淋浴区水浸传感器有水时不会进入离开流程，避免洗澡中途被关灯。
        - 关闭本区域洗澡标志。
        - 无其他区域洗澡时关闭循环泵。
        - 百叶帘支持总是打开、白天智能打开、禁用离开开帘。
@@ -542,6 +544,12 @@ trigger:
   entity_id: !input 'zone_b_presence_sensor'
   to: 'off'
   id: leave_check
+# 水停后重新判定一次离开流程：洗澡时被守卫拦下的收尾（清标志位/关泵/关灯）
+# 需要在水停之后补上，否则传感器不再变化就永远不会收尾。
+- platform: state
+  entity_id: !input 'water_leak_sensor'
+  to: 'off'
+  id: leave_check
 - platform: state
   entity_id: !input 'input_bool_post'
   to: 'on'
@@ -552,6 +560,7 @@ variables:
   var_inputs:
     main_presence_sensor: !input 'main_presence_sensor'
     shower_presence_sensor: !input 'shower_presence_sensor'
+    water_leak_sensor: !input 'water_leak_sensor'
     zone_a_presence_sensor: !input 'zone_a_presence_sensor'
     zone_b_presence_sensor: !input 'zone_b_presence_sensor'
     toilet_seat_sensor: !input 'toilet_seat_sensor'
@@ -809,10 +818,6 @@ action:
       - condition: template
         value_template: '{{ expand(var_inputs.input_get_up_mode) | selectattr(''state'', ''eq'', ''on'') | list | count ==
           0 }}'
-      - condition: template
-        value_template: '{{ is_state(var_inputs.light_sink_area.entity_id, ''on'') if var_inputs.light_sink_area.entity_id
-          is string else expand(var_inputs.light_sink_area.entity_id) | selectattr(''state'',''eq'',''on'') | list | count
-          > 0 }}'
       then:
       - if:
         - condition: template
@@ -834,10 +839,6 @@ action:
       - condition: template
         value_template: '{{ expand(var_inputs.input_get_up_mode) | selectattr(''state'', ''eq'', ''on'') | list | count ==
           0 }}'
-      - condition: template
-        value_template: '{{ is_state(var_inputs.light_sink_area.entity_id, ''on'') if var_inputs.light_sink_area.entity_id
-          is string else expand(var_inputs.light_sink_area.entity_id) | selectattr(''state'',''eq'',''on'') | list | count
-          > 0 }}'
       then:
       - if:
         - condition: template
@@ -859,10 +860,6 @@ action:
       - condition: template
         value_template: '{{ expand(var_inputs.input_get_up_mode) | selectattr(''state'', ''eq'', ''on'') | list | count ==
           0 }}'
-      - condition: template
-        value_template: '{{ is_state(var_inputs.light_sink_area.entity_id, ''on'') if var_inputs.light_sink_area.entity_id
-          is string else expand(var_inputs.light_sink_area.entity_id) | selectattr(''state'',''eq'',''on'') | list | count
-          > 0 }}'
       then:
       - if:
         - condition: template
@@ -929,6 +926,10 @@ action:
     - condition: template
       value_template: |
         {% set sensors = [var_inputs.main_presence_sensor, var_inputs.shower_presence_sensor] %} {% if var_inputs.zone_a_presence_sensor is string %}{% set sensors = sensors + [var_inputs.zone_a_presence_sensor] %}{% endif %} {% if var_inputs.zone_b_presence_sensor is string %}{% set sensors = sensors + [var_inputs.zone_b_presence_sensor] %}{% endif %} {{ sensors | select('is_state', 'on') | list | count == 0 }}
+    # 淋浴放水中不进入离开流程，避免把「洗澡中」标志位和关灯一起误清掉。
+    # 水停后传感器转为 off 会再次触发 leave_check，届时正常收尾。
+    - condition: template
+      value_template: '{{ not is_state(var_inputs.water_leak_sensor, ''on'') }}'
     sequence:
     - if:
       - condition: template
@@ -973,27 +974,69 @@ action:
               entity_id: !input 'cover_blinds'
         - delay:
             seconds: !input 'setting_light_off_delay'
-        - action: light.turn_off
-          target: !input 'light_sink_area'
-        - action: light.turn_off
-          target: !input 'light_shower_area'
+        # 延时结束后重新确认：仍然无人，且没有在洗澡/放水。
+        # 淋浴时人体存在传感器可能瞬时漏检（水汽、玻璃门、背对雷达），
+        # 若只凭触发瞬间的判定就关灯，会出现在洗澡中途被关灯的情况。
         - if:
           - condition: template
-            value_template: '{{ var_inputs.light_zone_a != {} }}'
+            value_template: |
+              {% set sensors = [var_inputs.main_presence_sensor, var_inputs.shower_presence_sensor] %} {% if var_inputs.zone_a_presence_sensor is string %}{% set sensors = sensors + [var_inputs.zone_a_presence_sensor] %}{% endif %} {% if var_inputs.zone_b_presence_sensor is string %}{% set sensors = sensors + [var_inputs.zone_b_presence_sensor] %}{% endif %} {{ sensors | select('is_state', 'on') | list | count == 0 and not is_state(var_inputs.water_leak_sensor, 'on') }}
           then:
           - action: light.turn_off
-            target: !input 'light_zone_a'
-        - if:
-          - condition: template
-            value_template: '{{ var_inputs.light_zone_b != {} }}'
-          then:
+            target: !input 'light_sink_area'
           - action: light.turn_off
-            target: !input 'light_zone_b'
-        - choose:
-          - conditions:
+            target: !input 'light_shower_area'
+          - if:
             - condition: template
-              value_template: '{{ var_inputs.setting_blind_mode == ''always'' }}'
-            sequence:
+              value_template: '{{ var_inputs.light_zone_a != {} }}'
+            then:
+            - action: light.turn_off
+              target: !input 'light_zone_a'
+          - if:
+            - condition: template
+              value_template: '{{ var_inputs.light_zone_b != {} }}'
+            then:
+            - action: light.turn_off
+              target: !input 'light_zone_b'
+          - choose:
+            - conditions:
+              - condition: template
+                value_template: '{{ var_inputs.setting_blind_mode == ''always'' }}'
+              sequence:
+              - if:
+                - condition: template
+                  value_template: '{{ var_inputs.debug_enabled }}'
+                then:
+                - action: logbook.log
+                  data:
+                    name: 卫生间智能控制[调试]
+                    message: |
+                      离开逻辑命中 blind_mode=always； 将执行百叶帘 open_cover。
+                    entity_id: !input 'cover_blinds'
+              - action: cover.open_cover
+                target:
+                  entity_id: !input 'cover_blinds'
+            - conditions:
+              - condition: template
+                value_template: '{{ var_inputs.setting_blind_mode == ''smart'' }}'
+              - condition: time
+                after: !input 'setting_blind_open_time'
+                before: !input 'setting_blind_close_time'
+              sequence:
+              - if:
+                - condition: template
+                  value_template: '{{ var_inputs.debug_enabled }}'
+                then:
+                - action: logbook.log
+                  data:
+                    name: 卫生间智能控制[调试]
+                    message: |
+                      离开逻辑命中 blind_mode=smart 且当前时间在开帘窗口内； 将执行百叶帘 open_cover。
+                    entity_id: !input 'cover_blinds'
+              - action: cover.open_cover
+                target:
+                  entity_id: !input 'cover_blinds'
+            default:
             - if:
               - condition: template
                 value_template: '{{ var_inputs.debug_enabled }}'
@@ -1002,32 +1045,9 @@ action:
                 data:
                   name: 卫生间智能控制[调试]
                   message: |
-                    离开逻辑命中 blind_mode=always； 将执行百叶帘 open_cover。
+                    离开逻辑未触发任何开帘动作； 可能原因：blind_mode=disabled， 或 smart 模式但当前不在开帘时间窗口内。
                   entity_id: !input 'cover_blinds'
-            - action: cover.open_cover
-              target:
-                entity_id: !input 'cover_blinds'
-          - conditions:
-            - condition: template
-              value_template: '{{ var_inputs.setting_blind_mode == ''smart'' }}'
-            - condition: time
-              after: !input 'setting_blind_open_time'
-              before: !input 'setting_blind_close_time'
-            sequence:
-            - if:
-              - condition: template
-                value_template: '{{ var_inputs.debug_enabled }}'
-              then:
-              - action: logbook.log
-                data:
-                  name: 卫生间智能控制[调试]
-                  message: |
-                    离开逻辑命中 blind_mode=smart 且当前时间在开帘窗口内； 将执行百叶帘 open_cover。
-                  entity_id: !input 'cover_blinds'
-            - action: cover.open_cover
-              target:
-                entity_id: !input 'cover_blinds'
-          default:
+          else:
           - if:
             - condition: template
               value_template: '{{ var_inputs.debug_enabled }}'
@@ -1036,7 +1056,7 @@ action:
               data:
                 name: 卫生间智能控制[调试]
                 message: |
-                  离开逻辑未触发任何开帘动作； 可能原因：blind_mode=disabled， 或 smart 模式但当前不在开帘时间窗口内。
+                  延时结束后检测到重新有人，或淋浴区仍在放水；本轮不关灯/不开帘，等待下次判定。
                 entity_id: !input 'cover_blinds'
       - sequence:
         - choose:
